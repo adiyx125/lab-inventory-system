@@ -239,9 +239,13 @@ if "Dashboard" in menu:
             plt.xticks(rotation=25, ha="right")
             st.pyplot(fig)
 
-# --- M2: EQUIPMENT INVENTORY (FULL CRUD + MULTI-FILTER) ---
-elif "Equipment" in menu or "Catalog" in menu:
-    st.title("Equipment Catalog & Laboratory Inventory")
+# --- M2: EQUIPMENT INVENTORY & CATALOG (FULL CRUD + MULTI-FILTER) ---
+elif "Equipment Catalog" in menu or "Equipment Inventory" in menu:
+    if is_student:
+        st.title("🔍 Laboratory Equipment Catalog")
+        st.caption("Browse, search, and inspect all hardware components, microcontrollers, and sensors available across department labs.")
+    else:
+        st.title("Equipment Catalog & Laboratory Inventory")
 
     if is_admin:
         tab1, tab2, tab3, tab4 = st.tabs(
@@ -252,14 +256,23 @@ elif "Equipment" in menu or "Catalog" in menu:
     eq_df = db.get_all_equipment()
 
     with tab1:
-        s1, s2, s3 = st.columns([2, 1, 1])
-        search_kw = s1.text_input("Search Name / ID / Brand")
+        s1, s2, s3, s4 = st.columns([2, 1, 1, 1])
+        search_kw = s1.text_input("Search Name / ID / Brand", key="cat_search_kw")
         filter_cat = s2.selectbox(
             "Filter Category",
             ["All"] + sorted(eq_df["category"].dropna().unique().tolist()),
+            key="cat_filter_cat",
         )
-        filter_status = s3.selectbox(
-            "Filter Status", ["All", "Active", "Under Repair", "Retired"]
+        labs_list = sorted(eq_df["lab_name"].dropna().unique().tolist()) if "lab_name" in eq_df.columns else []
+        filter_lab = s3.selectbox(
+            "Filter Lab",
+            ["All"] + labs_list,
+            key="cat_filter_lab",
+        )
+        filter_status = s4.selectbox(
+            "Filter Status",
+            ["All", "Active", "Under Repair", "Retired"],
+            key="cat_filter_status",
         )
 
         filtered_df = eq_df.copy()
@@ -273,36 +286,60 @@ elif "Equipment" in menu or "Catalog" in menu:
             ]
         if filter_cat != "All":
             filtered_df = filtered_df[filtered_df["category"] == filter_cat]
+        if filter_lab != "All":
+            filtered_df = filtered_df[filtered_df["lab_name"] == filter_lab]
         if filter_status != "All":
             filtered_df = filtered_df[filtered_df["status"] == filter_status]
 
-        st.dataframe(filtered_df, use_container_width=True)
+        if is_student:
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Total Components", len(filtered_df))
+            k2.metric("Available In Stock", int(filtered_df["available_qty"].sum()) if not filtered_df.empty else 0)
+            k3.metric("Total Units Owned", int(filtered_df["total_qty"].sum()) if not filtered_df.empty else 0)
+            k4.metric("Labs Represented", filtered_df["lab_name"].nunique() if not filtered_df.empty else 0)
+
+        st.dataframe(filtered_df, use_container_width=True, hide_index=True)
 
         if is_student:
-            st.markdown("#### ⚡ Quick Issue From Catalog")
-            st.caption(f"Issuing directly to student profile: **{st.session_state.get('full_name')}** ({st.session_state.get('roll_no')})")
-            avail_catalog = filtered_df[(filtered_df["available_qty"] > 0) & (filtered_df["status"] == "Active")]
-            if not avail_catalog.empty:
-                c_sel, c_btn = st.columns([3, 1])
-                with c_sel:
-                    quick_eq_choice = st.selectbox(
-                        "Choose item to issue directly to your account:",
-                        [f"{r['equipment_id']} - {r['name']} ({r['available_qty']} available in {r['lab_name']})" for _, r in avail_catalog.iterrows()],
-                        key="catalog_quick_issue_sel",
+            st.markdown("---")
+            c_info, c_action = st.columns([1.6, 1.4])
+            with c_info:
+                st.markdown(
+                    """
+                    <div style="padding: 1.1rem; border-radius: 8px; background: rgba(23, 162, 184, 0.08); border: 1px solid rgba(23, 162, 184, 0.25);">
+                        <h4 style="margin: 0; color: #17a2b8;">💡 Looking to Borrow Lab Hardware?</h4>
+                        <p style="margin: 0.5rem 0 0 0; font-size: 0.92rem; color: #ccc; line-height: 1.5;">
+                            The <strong>Equipment Catalog</strong> is your reference directory to discover available hardware, check technical brands, and verify which lab room holds stock.<br><br>
+                            To officially issue and borrow hardware for your practical, mini-project, or capstone, switch to <strong>📦 Issue Equipment</strong> in the navigation sidebar.
+                        </p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            with c_action:
+                st.markdown("#### 🔬 Component Details & Location")
+                inspect_options = [f"{r['equipment_id']} - {r['name']}" for _, r in filtered_df.iterrows()] if not filtered_df.empty else []
+                if inspect_options:
+                    selected_inspect = st.selectbox("Select component to inspect:", inspect_options, key="catalog_inspect_sel")
+                    insp_id = selected_inspect.split(" - ")[0]
+                    insp_row = filtered_df[filtered_df["equipment_id"] == insp_id].iloc[0]
+                    avail = int(insp_row["available_qty"])
+                    status = insp_row["status"]
+                    stock_badge = f"<span style='color: #28a745; font-weight: bold;'>🟢 {avail} In Stock</span>" if avail > 0 and status == "Active" else ("<span style='color: #ffc107; font-weight: bold;'>🟡 Under Repair</span>" if status == "Under Repair" else "<span style='color: #dc3545; font-weight: bold;'>🔴 Out of Stock / Inactive</span>")
+                    st.markdown(
+                        f"""
+                        <div style="font-size: 0.9rem; line-height: 1.7; padding: 0.85rem 1rem; border-radius: 6px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);">
+                            <div><strong>Category:</strong> {insp_row['category']}</div>
+                            <div><strong>Manufacturer / Brand:</strong> {insp_row['brand']}</div>
+                            <div><strong>Storage Location:</strong> 📍 {insp_row['lab_name']}</div>
+                            <div><strong>Current Availability:</strong> {stock_badge} (Total units: {insp_row['total_qty']})</div>
+                            <div><strong>Status:</strong> {status}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
                     )
-                with c_btn:
-                    st.write("")
-                    st.write("")
-                    if st.button("🚀 Issue to My Account", key="catalog_quick_issue_btn", type="primary", use_container_width=True):
-                        quick_id = quick_eq_choice.split(" - ")[0]
-                        ok, msg = db.issue_equipment(st.session_state.get("full_name"), st.session_state.get("roll_no"), quick_id)
-                        if ok:
-                            st.success(f"🎉 Item issued successfully to {st.session_state.get('full_name')} ({st.session_state.get('roll_no')})!")
-                            st.rerun()
-                        else:
-                            st.error(msg)
-            else:
-                st.info("No in-stock available equipment matching current filter.")
+                else:
+                    st.info("No components match the current filter.")
 
     if is_admin:
         with tab2:
@@ -406,6 +443,18 @@ elif "Issue Equipment" in menu:
     st.title("📦 Student Equipment Issue Portal")
     st.caption("Select and issue any active laboratory component for your lab practicals or mini-projects.")
 
+    if st.session_state.get("issue_success_alert"):
+        alert_data = st.session_state["issue_success_alert"]
+        st.success(
+            f"🎉 **{alert_data['name']}** (`{alert_data['id']}`) issued successfully to **{alert_data['student']}** ({alert_data['roll_no']})!"
+        )
+        st.info(
+            f"📍 **Collection Counter:** Please collect your hardware component from the **{alert_data['lab']}** counter by presenting your Student ID."
+        )
+        if st.button("Dismiss Notification", key="dismiss_issue_alert_btn"):
+            del st.session_state["issue_success_alert"]
+            st.rerun()
+
     # Student Identity Profile Card
     st.markdown(
         f"""
@@ -482,8 +531,13 @@ elif "Issue Equipment" in menu:
                             selected_eq_id,
                         )
                         if ok:
-                            st.success(f"🎉 **{selected_row['name']}** (`{selected_eq_id}`) issued successfully to **{st.session_state.get('full_name')}** ({st.session_state.get('roll_no')})!")
-                            st.info(f"📍 **Collection Counter:** Please collect your hardware from **{selected_row['lab_name']}**.")
+                            st.session_state["issue_success_alert"] = {
+                                "name": selected_row["name"],
+                                "id": selected_eq_id,
+                                "student": st.session_state.get("full_name"),
+                                "roll_no": st.session_state.get("roll_no"),
+                                "lab": selected_row["lab_name"],
+                            }
                             st.rerun()
                         else:
                             st.error(f"❌ {msg}")
