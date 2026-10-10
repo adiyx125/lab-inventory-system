@@ -1,18 +1,35 @@
+# ==============================================================================
+# MODULE: DATABASE SEEDER SCRIPT
+# Purpose: Resets and populates the laboratory database with default users,
+#          real IT department equipment inventory, active borrowings, and maintenance logs.
+# ==============================================================================
 import sqlite3
 from database import init_db
 
 
+# ==============================================================================
+# TOPIC: SEED DATABASE FUNCTION
+# Purpose: Clears existing records and repopulates database with baseline data.
+# ==============================================================================
 def seed():
+    # Initialize SQLite database schema
     init_db()
     conn = sqlite3.connect("inventory.db")
     cursor = conn.cursor()
 
+    # --------------------------------------------------------------------------
+    # TOPIC: CLEAR PREVIOUS DATA
+    # Purpose: Wipes old rows to ensure a fresh, consistent seed state.
+    # --------------------------------------------------------------------------
     cursor.execute("DELETE FROM users")
     cursor.execute("DELETE FROM equipment")
     cursor.execute("DELETE FROM transactions")
     cursor.execute("DELETE FROM maintenance")
 
-    # Sample Users (M1 - Admin, Faculty, and Student)
+    # --------------------------------------------------------------------------
+    # TOPIC: SEED USER ACCOUNTS (M1 AUTHENTICATION)
+    # Purpose: Creates sample Admin, Faculty, and Student accounts with role profiles.
+    # --------------------------------------------------------------------------
     users = [
         ("admin", "admin123", "Admin", "System Administrator", "ADMIN-01", "Information Technology"),
         ("faculty", "fac123", "Faculty", "Prof. S. Sharma", "FAC-01", "Information Technology"),
@@ -20,7 +37,10 @@ def seed():
     ]
     cursor.executemany("INSERT INTO users (username, password, role, full_name, roll_no, department) VALUES (?, ?, ?, ?, ?, ?)", users)
 
-    # 78 Real IT Dept Equipment Items (with status column default 'Active')
+    # --------------------------------------------------------------------------
+    # TOPIC: SEED LABORATORY EQUIPMENT CATALOG (M2 INVENTORY)
+    # Purpose: Populates 78 real IT Department components, boards, and sensors.
+    # --------------------------------------------------------------------------
     equipment = [
         (
             "EQ-200",
@@ -874,7 +894,10 @@ def seed():
         "INSERT INTO equipment VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", equipment
     )
 
-    # Issued transactions
+    # --------------------------------------------------------------------------
+    # TOPIC: SEED SAMPLE ISSUED TRANSACTIONS (M3 TRANSACTIONS)
+    # Purpose: Records active equipment borrowings assigned to real student roll numbers.
+    # --------------------------------------------------------------------------
     transactions = [
         ("Aayush Sawant", "125A3091", "EQ-204", "2026-09-15", None, None, "Issued"),
         ("Arya Warang", "125A3124", "EQ-256", "2026-09-18", None, None, "Issued"),
@@ -887,11 +910,19 @@ def seed():
     """,
         transactions,
     )
+
+    # --------------------------------------------------------------------------
+    # TOPIC: SYNC AVAILABLE STOCK FOR ISSUED ITEMS
+    # Purpose: Decrements available_qty for the items currently issued above.
+    # --------------------------------------------------------------------------
     cursor.execute(
         "UPDATE equipment SET available_qty = available_qty - 1 WHERE equipment_id IN ('EQ-204', 'EQ-256', 'EQ-208')"
     )
 
-    # Maintenance transactions
+    # --------------------------------------------------------------------------
+    # TOPIC: SEED MAINTENANCE & REPAIR LOGS (M4 MAINTENANCE)
+    # Purpose: Records equipment undergoing technician diagnostics or repairs.
+    # --------------------------------------------------------------------------
     repairs = [
         ("EQ-212", "Prof. Sharma", "2026-09-10", "Under Repair"),
         ("EQ-231", "Apex Instruments", "2026-09-05", "Repaired"),
@@ -903,14 +934,25 @@ def seed():
     """,
         repairs,
     )
+
+    # --------------------------------------------------------------------------
+    # TOPIC: SYNC STOCK FOR ITEMS UNDER REPAIR
+    # Purpose: Adjusts quantities and marks equipment status as 'Under Repair'.
+    # --------------------------------------------------------------------------
     cursor.execute(
         "UPDATE equipment SET total_qty = total_qty - 1, available_qty = available_qty - 1, status = 'Under Repair' WHERE equipment_id = 'EQ-212'"
     )
 
+    # Commit changes and close connection
     conn.commit()
     conn.close()
     print("Database seeded with updated schema and real records.")
 
 
+# ==============================================================================
+# TOPIC: SCRIPT ENTRYPOINT
+# Purpose: Executes database seeding when run directly as a script.
+# ==============================================================================
 if __name__ == "__main__":
     seed()
+

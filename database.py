@@ -1,3 +1,7 @@
+# ==============================================================================
+# MODULE: DATABASE CONFIGURATION & CORE IMPORTS
+# Purpose: Imports required database libraries and defines database file path.
+# ==============================================================================
 import sqlite3
 import pandas as pd
 from datetime import datetime
@@ -5,17 +9,29 @@ from datetime import datetime
 DB_NAME = "inventory.db"
 
 
+# ==============================================================================
+# TOPIC: DATABASE CONNECTION MANAGEMENT
+# Purpose: Establishes and returns a SQLite connection with foreign keys enabled.
+# ==============================================================================
 def get_connection():
     conn = sqlite3.connect(DB_NAME, check_same_thread=False)
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
 
+# ==============================================================================
+# TOPIC: DATABASE INITIALIZATION & SCHEMA MIGRATION
+# Purpose: Creates required tables (users, equipment, transactions, maintenance)
+#          and performs automatic column migrations if upgrading existing DB.
+# ==============================================================================
 def init_db():
     conn = get_connection()
     cursor = conn.cursor()
 
-    # 1. Users Table (M1) - with full_name, roll_no, department
+    # --------------------------------------------------------------------------
+    # TABLE 1: Users Table (Authentication & User Profiles)
+    # Purpose: Stores credentials, roles (Admin, Faculty, Student), and student details.
+    # --------------------------------------------------------------------------
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY,
@@ -27,7 +43,10 @@ def init_db():
         )
     """)
 
-    # Safe schema migration for existing databases
+    # --------------------------------------------------------------------------
+    # SCHEMA MIGRATION: Safe column additions for older database files
+    # Purpose: Adds full_name, roll_no, department if missing from existing users table.
+    # --------------------------------------------------------------------------
     cursor.execute("PRAGMA table_info(users)")
     existing_cols = [c[1] for c in cursor.fetchall()]
     if "full_name" not in existing_cols:
@@ -37,7 +56,10 @@ def init_db():
     if "department" not in existing_cols:
         cursor.execute("ALTER TABLE users ADD COLUMN department TEXT DEFAULT ''")
 
-    # 2. Equipment Inventory Table (M2 - with status column)
+    # --------------------------------------------------------------------------
+    # TABLE 2: Equipment Inventory Table
+    # Purpose: Stores laboratory equipment, specs, categories, quantities, and status.
+    # --------------------------------------------------------------------------
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS equipment (
             equipment_id TEXT PRIMARY KEY,
@@ -52,7 +74,10 @@ def init_db():
         )
     """)
 
-    # 3. Transactions Table (M3)
+    # --------------------------------------------------------------------------
+    # TABLE 3: Equipment Transactions Table (Issues & Returns)
+    # Purpose: Tracks equipment borrowed by students, issue dates, and return statuses.
+    # --------------------------------------------------------------------------
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS transactions (
             transaction_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,7 +92,10 @@ def init_db():
         )
     """)
 
-    # 4. Maintenance / Damage Logs (M4)
+    # --------------------------------------------------------------------------
+    # TABLE 4: Maintenance & Damage Logs Table
+    # Purpose: Tracks equipment under repair, technician names, and repair progress.
+    # --------------------------------------------------------------------------
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS maintenance (
             repair_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,7 +111,10 @@ def init_db():
     conn.close()
 
 
-# --- M1: Authentication ---
+# ==============================================================================
+# TOPIC: USER AUTHENTICATION & LOGIN VERIFICATION
+# Purpose: Verifies user credentials against database and returns profile details.
+# ==============================================================================
 def verify_user(username, password):
     conn = get_connection()
     cursor = conn.cursor()
@@ -104,17 +135,27 @@ def verify_user(username, password):
     return None
 
 
+# ==============================================================================
+# TOPIC: STUDENT & USER REGISTRATION
+# Purpose: Registers a new user account with duplicate username and roll number checks.
+# ==============================================================================
 def register_user(username, password, role="Student", full_name="", roll_no="", department=""):
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Check if username exists
+    # --------------------------------------------------------------------------
+    # VALIDATION 1: Check if username already exists
+    # Purpose: Ensures unique usernames across all system accounts.
+    # --------------------------------------------------------------------------
     cursor.execute("SELECT username FROM users WHERE LOWER(username) = LOWER(?)", (username.strip(),))
     if cursor.fetchone():
         conn.close()
         return False, f"Username '{username}' is already taken. Please choose another username."
 
-    # If Student and roll number provided, check if roll number already exists
+    # --------------------------------------------------------------------------
+    # VALIDATION 2: Check if student roll number is already registered
+    # Purpose: Prevents duplicate student registrations with the same PRN / Roll Number.
+    # --------------------------------------------------------------------------
     if role == "Student" and roll_no.strip():
         cursor.execute("SELECT username FROM users WHERE LOWER(roll_no) = LOWER(?)", (roll_no.strip(),))
         existing = cursor.fetchone()
@@ -122,6 +163,10 @@ def register_user(username, password, role="Student", full_name="", roll_no="", 
             conn.close()
             return False, f"Roll Number '{roll_no}' is already registered under username '{existing[0]}'."
 
+    # --------------------------------------------------------------------------
+    # INSERTION: Save new user record
+    # Purpose: Stores the newly registered user into the users table.
+    # --------------------------------------------------------------------------
     cursor.execute(
         """
         INSERT INTO users (username, password, role, full_name, roll_no, department)
@@ -134,6 +179,10 @@ def register_user(username, password, role="Student", full_name="", roll_no="", 
     return True, "Account created successfully! You can now log in."
 
 
+# ==============================================================================
+# TOPIC: STUDENT BORROWING & RETURN TRANSACTION HISTORY
+# Purpose: Fetches borrowing and return history for a specific student by roll number or name.
+# ==============================================================================
 def get_student_transactions(roll_no=None, student_name=None):
     conn = get_connection()
     query = """
@@ -149,7 +198,10 @@ def get_student_transactions(roll_no=None, student_name=None):
     return df
 
 
-# --- M2: Inventory Operations (Full CRUD) ---
+# ==============================================================================
+# TOPIC: ADD EQUIPMENT (INVENTORY CRUD - CREATE)
+# Purpose: Inserts a newly procured laboratory equipment item into the inventory.
+# ==============================================================================
 def add_equipment(eq_id, name, cat, brand, lab, qty, status, p_date):
     conn = get_connection()
     cursor = conn.cursor()
@@ -164,6 +216,10 @@ def add_equipment(eq_id, name, cat, brand, lab, qty, status, p_date):
     conn.close()
 
 
+# ==============================================================================
+# TOPIC: UPDATE EQUIPMENT (INVENTORY CRUD - UPDATE)
+# Purpose: Modifies metadata, lab assignment, quantities, and status of existing equipment.
+# ==============================================================================
 def update_equipment(eq_id, name, cat, brand, lab, total_qty, avail_qty, status):
     conn = get_connection()
     cursor = conn.cursor()
@@ -179,6 +235,10 @@ def update_equipment(eq_id, name, cat, brand, lab, total_qty, avail_qty, status)
     conn.close()
 
 
+# ==============================================================================
+# TOPIC: DELETE EQUIPMENT (INVENTORY CRUD - DELETE)
+# Purpose: Permanently deletes an equipment record from the inventory table.
+# ==============================================================================
 def delete_equipment(eq_id):
     conn = get_connection()
     cursor = conn.cursor()
@@ -187,6 +247,10 @@ def delete_equipment(eq_id):
     conn.close()
 
 
+# ==============================================================================
+# TOPIC: RETRIEVE ALL EQUIPMENT (INVENTORY CRUD - READ)
+# Purpose: Retrieves the full equipment catalog from the database as a DataFrame.
+# ==============================================================================
 def get_all_equipment():
     conn = get_connection()
     df = pd.read_sql("SELECT * FROM equipment", conn)
@@ -194,11 +258,19 @@ def get_all_equipment():
     return df
 
 
-# --- M3: Issue & Return Helpers ---
+# ==============================================================================
+# TOPIC: ISSUE EQUIPMENT TRANSACTION
+# Purpose: Validates stock and status, inserts an 'Issued' transaction record,
+#          and decrements the available stock count by 1.
+# ==============================================================================
 def issue_equipment(student_name, roll_no, eq_id):
     conn = get_connection()
     cursor = conn.cursor()
 
+    # --------------------------------------------------------------------------
+    # STEP 1: Verify equipment exists, is in stock, and has Active status
+    # Purpose: Prevents issuing equipment that is out of stock or under repair.
+    # --------------------------------------------------------------------------
     cursor.execute(
         "SELECT available_qty, status FROM equipment WHERE equipment_id = ?", (eq_id,)
     )
@@ -210,6 +282,10 @@ def issue_equipment(student_name, roll_no, eq_id):
         conn.close()
         return False, f"Cannot issue item currently marked as '{res[1]}'."
 
+    # --------------------------------------------------------------------------
+    # STEP 2: Record issue transaction
+    # Purpose: Logs student details, equipment ID, issue date, and 'Issued' status.
+    # --------------------------------------------------------------------------
     today = datetime.now().strftime("%Y-%m-%d")
     cursor.execute(
         """
@@ -219,6 +295,10 @@ def issue_equipment(student_name, roll_no, eq_id):
         (student_name, roll_no, eq_id, today),
     )
 
+    # --------------------------------------------------------------------------
+    # STEP 3: Decrement available inventory quantity
+    # Purpose: Deducts 1 unit from available_qty in equipment table.
+    # --------------------------------------------------------------------------
     cursor.execute(
         "UPDATE equipment SET available_qty = available_qty - 1 WHERE equipment_id = ?",
         (eq_id,),
@@ -228,10 +308,19 @@ def issue_equipment(student_name, roll_no, eq_id):
     return True, "Equipment issued successfully."
 
 
+# ==============================================================================
+# TOPIC: RETURN EQUIPMENT TRANSACTION & DAMAGE ROUTING
+# Purpose: Updates transaction to 'Returned', records condition (Good / Damaged / Lost),
+#          and either restores available stock or logs damaged item to maintenance.
+# ==============================================================================
 def return_equipment(trans_id, condition):
     conn = get_connection()
     cursor = conn.cursor()
 
+    # --------------------------------------------------------------------------
+    # STEP 1: Verify transaction exists and is currently in 'Issued' state
+    # Purpose: Ensures only open borrowings can be processed for return.
+    # --------------------------------------------------------------------------
     cursor.execute(
         "SELECT equipment_id, status FROM transactions WHERE transaction_id = ?",
         (trans_id,),
@@ -244,6 +333,10 @@ def return_equipment(trans_id, condition):
     eq_id = res[0]
     today = datetime.now().strftime("%Y-%m-%d")
 
+    # --------------------------------------------------------------------------
+    # STEP 2: Update transaction record with return date and physical condition
+    # Purpose: Marks transaction as 'Returned' with condition inspection recorded.
+    # --------------------------------------------------------------------------
     cursor.execute(
         """
         UPDATE transactions
@@ -253,6 +346,12 @@ def return_equipment(trans_id, condition):
         (today, condition, trans_id),
     )
 
+    # --------------------------------------------------------------------------
+    # STEP 3: Branch stock adjustments based on component condition
+    # Purpose: If Good -> increment available_qty.
+    #          If Damaged -> reduce total_qty, set status to 'Under Repair', log maintenance.
+    #          If Lost -> reduce total_qty.
+    # --------------------------------------------------------------------------
     if condition == "Good":
         cursor.execute(
             "UPDATE equipment SET available_qty = available_qty + 1 WHERE equipment_id = ?",
@@ -281,6 +380,10 @@ def return_equipment(trans_id, condition):
     return True, f"Equipment returned and recorded as {condition}."
 
 
+# ==============================================================================
+# TOPIC: FETCH CURRENT ACTIVE ISSUES
+# Purpose: Returns all transactions currently in 'Issued' status.
+# ==============================================================================
 def get_active_issues():
     conn = get_connection()
     df = pd.read_sql("SELECT * FROM transactions WHERE status = 'Issued'", conn)
@@ -288,7 +391,10 @@ def get_active_issues():
     return df
 
 
-# --- M4: Maintenance Helpers ---
+# ==============================================================================
+# TOPIC: FETCH MAINTENANCE & REPAIR RECORDS
+# Purpose: Retrieves maintenance history, optionally filtered for a specific equipment ID.
+# ==============================================================================
 def get_maintenance_records(eq_id=None):
     conn = get_connection()
     if eq_id:
@@ -301,6 +407,11 @@ def get_maintenance_records(eq_id=None):
     return df
 
 
+# ==============================================================================
+# TOPIC: UPDATE REPAIR / MAINTENANCE RECORD
+# Purpose: Updates assigned technician and repair status; if status is 'Repaired',
+#          restores equipment stock and resets status to 'Active'.
+# ==============================================================================
 def update_repair(repair_id, technician, status):
     conn = get_connection()
     cursor = conn.cursor()
@@ -313,6 +424,10 @@ def update_repair(repair_id, technician, status):
         (technician, status, repair_id),
     )
 
+    # --------------------------------------------------------------------------
+    # RESTORATION LOGIC: Return repaired item back to active inventory
+    # Purpose: Increments total_qty & available_qty and marks status as 'Active'.
+    # --------------------------------------------------------------------------
     if status == "Repaired":
         cursor.execute(
             "SELECT equipment_id FROM maintenance WHERE repair_id = ?", (repair_id,)

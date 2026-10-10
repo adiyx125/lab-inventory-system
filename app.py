@@ -1,11 +1,25 @@
+# ==============================================================================
+# MODULE: STREAMLIT LAB EQUIPMENT INVENTORY MANAGEMENT SYSTEM
+# Purpose: Main entrypoint for the web application providing role-based portals
+#          for Students, Faculty, and Administrators to manage, track, issue,
+#          and audit laboratory hardware components and project BOMs.
+# ==============================================================================
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import database as db
 
+# ------------------------------------------------------------------------------
+# TOPIC: APP CONFIGURATION & DATABASE INITIALIZATION
+# Purpose: Sets browser title, wide layout, custom icon, and ensures DB tables exist.
+# ------------------------------------------------------------------------------
 st.set_page_config(page_title="Lab Equipment Inventory", layout="wide", page_icon="🔬")
 db.init_db()
 
+# ------------------------------------------------------------------------------
+# TOPIC: USER SESSION STATE INITIALIZATION
+# Purpose: Pre-configures authentication flags and user profile variables in Streamlit memory.
+# ------------------------------------------------------------------------------
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
     st.session_state["user_role"] = None
@@ -14,8 +28,16 @@ if "authenticated" not in st.session_state:
     st.session_state["roll_no"] = None
     st.session_state["department"] = None
 
-# --- M1: LOGIN & STUDENT REGISTRATION SCREEN ---
+# ==============================================================================
+# SECTION: MODULE 1 (M1) - LOGIN & STUDENT REGISTRATION PORTAL
+# Purpose: Renders landing screen when user is unauthenticated, allowing users
+#          to sign in with role credentials or register a new student account.
+# ==============================================================================
 if not st.session_state["authenticated"]:
+    # --------------------------------------------------------------------------
+    # TOPIC: PORTAL BRANDING & INSTITUTIONAL HEADER
+    # Purpose: Displays college and department headers for the inventory system.
+    # --------------------------------------------------------------------------
     st.markdown(
         "<h2 style='text-align: center; margin-bottom: 0px;'>🔬 Lab Equipment Inventory Management System</h2>",
         unsafe_allow_html=True,
@@ -25,10 +47,18 @@ if not st.session_state["authenticated"]:
         unsafe_allow_html=True,
     )
 
+    # --------------------------------------------------------------------------
+    # TOPIC: LOGIN AND REGISTRATION TABBED CONTAINER
+    # Purpose: Organizes Sign In and Student Sign Up into separate accessible tabs.
+    # --------------------------------------------------------------------------
     col1, col2, col3 = st.columns([0.8, 1.4, 0.8])
     with col2:
         tab_login, tab_register = st.tabs(["🔑 Sign In", "🎓 Student Sign Up / Register"])
 
+        # ----------------------------------------------------------------------
+        # SUB-TOPIC: USER SIGN IN FORM
+        # Purpose: Validates credentials against DB and initializes session on match.
+        # ----------------------------------------------------------------------
         with tab_login:
             st.subheader("Login Portal")
             st.caption("Access laboratory equipment catalog, project BOMs, and issue hardware components.")
@@ -55,8 +85,10 @@ if not st.session_state["authenticated"]:
                     else:
                         st.warning("Please enter both username and password.")
 
-
-
+        # ----------------------------------------------------------------------
+        # SUB-TOPIC: STUDENT SELF-REGISTRATION FORM
+        # Purpose: Allows students to create a verified account and auto-logs them in.
+        # ----------------------------------------------------------------------
         with tab_register:
             st.subheader("Student Registration")
             st.caption("Create your personalized lab account to issue items, track borrowings, and explore project BOMs.")
@@ -112,11 +144,19 @@ if not st.session_state["authenticated"]:
                             st.error(f"❌ {msg}")
     st.stop()
 
-# --- SIDEBAR NAVIGATION (ROLE-AWARE) ---
+# ==============================================================================
+# SECTION: SIDEBAR NAVIGATION (ROLE-AWARE ACCESS CONTROL)
+# Purpose: Renders authenticated user profile info and dynamically mounts permitted
+#          navigation options according to user role (Student, Faculty, or Admin).
+# ==============================================================================
 is_student = st.session_state.get("user_role") == "Student"
 is_admin = st.session_state.get("user_role") == "Admin"
 is_faculty = st.session_state.get("user_role") == "Faculty"
 
+# ------------------------------------------------------------------------------
+# TOPIC: USER IDENTITY & ROLE BADGE
+# Purpose: Displays current logged-in user name, designated role, roll number, and department.
+# ------------------------------------------------------------------------------
 role_icon = "🎓" if is_student else ("👑" if is_admin else "👨‍🏫")
 st.sidebar.markdown(f"### {role_icon} {st.session_state.get('full_name', st.session_state['username'])}")
 st.sidebar.caption(
@@ -126,6 +166,10 @@ st.sidebar.caption(
 st.sidebar.caption(f"Dept: **{st.session_state.get('department', 'Information Technology')}**")
 st.sidebar.markdown("---")
 
+# ------------------------------------------------------------------------------
+# TOPIC: DYNAMIC NAVIGATION MENU SELECTION
+# Purpose: Restricts views based on authorization level.
+# ------------------------------------------------------------------------------
 if is_student:
     nav_options = [
         "📦 Issue Equipment",
@@ -154,6 +198,10 @@ else:  # Admin
 
 menu = st.sidebar.radio("Navigate", nav_options)
 
+# ------------------------------------------------------------------------------
+# TOPIC: LOGOUT SESSION TERMINATION
+# Purpose: Resets session state variables and returns user to the login screen.
+# ------------------------------------------------------------------------------
 if st.sidebar.button("Logout", use_container_width=True):
     st.session_state["authenticated"] = False
     st.session_state["user_role"] = None
@@ -163,10 +211,18 @@ if st.sidebar.button("Logout", use_container_width=True):
     st.session_state["department"] = None
     st.rerun()
 
-# --- M5: DASHBOARD & ANALYTICS ---
+# ==============================================================================
+# SECTION: MODULE 5 (M5) - DASHBOARD & REAL-TIME ANALYTICS
+# Purpose: Aggregates laboratory metrics, stock availability, active borrowings,
+#          damaged items, and visual charts for departmental oversight.
+# ==============================================================================
 if "Dashboard" in menu:
     st.title("Laboratory Dashboard & Real-Time KPIs")
 
+    # --------------------------------------------------------------------------
+    # TOPIC: INVENTORY METRICS COMPUTATION
+    # Purpose: Queries database tables to calculate real-time inventory statistics.
+    # --------------------------------------------------------------------------
     eq_df = db.get_all_equipment()
     trans_df = db.get_active_issues()
     maint_df = db.get_maintenance_records()
@@ -179,6 +235,10 @@ if "Dashboard" in menu:
     )
     low_stock_count = len(eq_df[eq_df["available_qty"] < 3]) if not eq_df.empty else 0
 
+    # --------------------------------------------------------------------------
+    # TOPIC: TOP-LEVEL KPI METRIC SCORECARDS
+    # Purpose: Shows summary cards for total assets, stock, issued items, repairs, and low stock.
+    # --------------------------------------------------------------------------
     k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("Total Assets", total_assets)
     k2.metric("Available Stock", available_assets)
@@ -194,6 +254,10 @@ if "Dashboard" in menu:
     st.markdown("---")
     c1, c2 = st.columns(2)
 
+    # --------------------------------------------------------------------------
+    # TOPIC: DONUT CHART - ASSET STATUS OVERVIEW
+    # Purpose: Visualizes proportion of Available vs. Issued vs. Under Repair hardware.
+    # --------------------------------------------------------------------------
     with c1:
         st.subheader("Asset Status Overview")
         if total_assets > 0:
@@ -229,6 +293,10 @@ if "Dashboard" in menu:
         else:
             st.info("No equipment data available.")
 
+    # --------------------------------------------------------------------------
+    # TOPIC: BAR CHART - EQUIPMENT BY CATEGORY
+    # Purpose: Visualizes total hardware units categorized across departments and labs.
+    # --------------------------------------------------------------------------
     with c2:
         st.subheader("Equipment by Category")
         if not eq_df.empty:
@@ -239,7 +307,11 @@ if "Dashboard" in menu:
             plt.xticks(rotation=25, ha="right")
             st.pyplot(fig)
 
-# --- M2: EQUIPMENT INVENTORY & CATALOG (FULL CRUD + MULTI-FILTER) ---
+# ==============================================================================
+# SECTION: MODULE 2 (M2) - EQUIPMENT CATALOG & INVENTORY (FULL CRUD + FILTER)
+# Purpose: Allows Students to browse and inspect equipment availability across labs,
+#          and provides Admins/Faculty with full CRUD (Add, Edit, Delete) capabilities.
+# ==============================================================================
 elif "Equipment Catalog" in menu or "Equipment Inventory" in menu:
     if is_student:
         st.title("🔍 Laboratory Equipment Catalog")
@@ -247,6 +319,10 @@ elif "Equipment Catalog" in menu or "Equipment Inventory" in menu:
     else:
         st.title("Equipment Catalog & Laboratory Inventory")
 
+    # --------------------------------------------------------------------------
+    # TOPIC: ROLE-BASED TAB CONFIGURATION
+    # Purpose: Admins get View, Add, Edit, and Delete tabs; Students get View/Search.
+    # --------------------------------------------------------------------------
     if is_admin:
         tab1, tab2, tab3, tab4 = st.tabs(
             ["View / Search", "Add Equipment", "Edit Equipment", "Delete Equipment"]
@@ -255,6 +331,10 @@ elif "Equipment Catalog" in menu or "Equipment Inventory" in menu:
         tab1, = st.tabs(["View / Search Catalog"])
     eq_df = db.get_all_equipment()
 
+    # --------------------------------------------------------------------------
+    # SUB-SECTION: TAB 1 - VIEW & MULTI-CRITERIA SEARCH ENGINE
+    # Purpose: Enables filtering equipment by keyword search, category, lab, and status.
+    # --------------------------------------------------------------------------
     with tab1:
         s1, s2, s3, s4 = st.columns([2, 1, 1, 1])
         search_kw = s1.text_input("Search Name / ID / Brand", key="cat_search_kw")
@@ -275,6 +355,10 @@ elif "Equipment Catalog" in menu or "Equipment Inventory" in menu:
             key="cat_filter_status",
         )
 
+        # ----------------------------------------------------------------------
+        # TOPIC: DATAFRAME FILTER EXECUTION
+        # Purpose: Applies search query and dropdown filters to the equipment DataFrame.
+        # ----------------------------------------------------------------------
         filtered_df = eq_df.copy()
         if search_kw:
             filtered_df = filtered_df[
@@ -291,6 +375,10 @@ elif "Equipment Catalog" in menu or "Equipment Inventory" in menu:
         if filter_status != "All":
             filtered_df = filtered_df[filtered_df["status"] == filter_status]
 
+        # ----------------------------------------------------------------------
+        # TOPIC: STUDENT INVENTORY SUMMARY METRICS
+        # Purpose: Displays summary metrics for total components, stock count, and labs.
+        # ----------------------------------------------------------------------
         if is_student:
             k1, k2, k3, k4 = st.columns(4)
             k1.metric("Total Components", len(filtered_df))
@@ -300,6 +388,10 @@ elif "Equipment Catalog" in menu or "Equipment Inventory" in menu:
 
         st.dataframe(filtered_df, use_container_width=True, hide_index=True)
 
+        # ----------------------------------------------------------------------
+        # TOPIC: STUDENT HARDWARE BORROWING GUIDANCE & COMPONENT INSPECTOR
+        # Purpose: Explains how to borrow items and lets students inspect component specs.
+        # ----------------------------------------------------------------------
         if is_student:
             st.markdown("---")
             c_info, c_action = st.columns([1.6, 1.4])
@@ -341,7 +433,15 @@ elif "Equipment Catalog" in menu or "Equipment Inventory" in menu:
                 else:
                     st.info("No components match the current filter.")
 
+    # --------------------------------------------------------------------------
+    # SUB-SECTION: ADMIN CRUD OPERATIONS (ADD / EDIT / DELETE)
+    # Purpose: Restricted management forms available exclusively to administrators.
+    # --------------------------------------------------------------------------
     if is_admin:
+        # ----------------------------------------------------------------------
+        # TOPIC: TAB 2 - ADD NEW EQUIPMENT (CREATE)
+        # Purpose: Inserts a new equipment item into the laboratory inventory.
+        # ----------------------------------------------------------------------
         with tab2:
             with st.form("add_form"):
                 c1, c2 = st.columns(2)
@@ -385,6 +485,10 @@ elif "Equipment Catalog" in menu or "Equipment Inventory" in menu:
                         except Exception as e:
                             st.error(f"Error: {e}")
 
+        # ----------------------------------------------------------------------
+        # TOPIC: TAB 3 - EDIT EQUIPMENT DETAILS (UPDATE)
+        # Purpose: Modifies metadata, lab room, quantities, and status of existing items.
+        # ----------------------------------------------------------------------
         with tab3:
             selected_id = st.selectbox(
                 "Select Equipment ID to Edit", eq_df["equipment_id"].tolist()
@@ -427,6 +531,10 @@ elif "Equipment Catalog" in menu or "Equipment Inventory" in menu:
                     st.success("Equipment details updated.")
                     st.rerun()
 
+        # ----------------------------------------------------------------------
+        # TOPIC: TAB 4 - DELETE EQUIPMENT PERMANENTLY (DELETE)
+        # Purpose: Permanently removes selected equipment item from the database.
+        # ----------------------------------------------------------------------
         with tab4:
             del_id = st.selectbox(
                 "Select Item to Delete",
@@ -438,11 +546,19 @@ elif "Equipment Catalog" in menu or "Equipment Inventory" in menu:
                 st.success(f"Deleted {del_id}.")
                 st.rerun()
 
-# --- STUDENT: ISSUE EQUIPMENT ---
+# ==============================================================================
+# SECTION: STUDENT EQUIPMENT ISSUE PORTAL
+# Purpose: Enables authenticated students to select, verify, and issue available
+#          laboratory equipment for experiments and capstone projects.
+# ==============================================================================
 elif "Issue Equipment" in menu:
     st.title("📦 Student Equipment Issue Portal")
     st.caption("Select and issue any active laboratory component for your lab practicals or mini-projects.")
 
+    # --------------------------------------------------------------------------
+    # TOPIC: ISSUE SUCCESS NOTIFICATION & PHYSICAL PICKUP REMINDER
+    # Purpose: Shows confirmation of successful issue and reminds student of lab pickup desk.
+    # --------------------------------------------------------------------------
     if st.session_state.get("issue_success_alert"):
         alert_data = st.session_state["issue_success_alert"]
         st.success(
@@ -455,7 +571,10 @@ elif "Issue Equipment" in menu:
             del st.session_state["issue_success_alert"]
             st.rerun()
 
-    # Student Identity Profile Card
+    # --------------------------------------------------------------------------
+    # TOPIC: VERIFIED STUDENT PROFILE BADGE
+    # Purpose: Displays verified student credentials attached to this session.
+    # --------------------------------------------------------------------------
     st.markdown(
         f"""
         <div style="padding: 1rem 1.25rem; border-radius: 8px; background: rgba(40, 167, 69, 0.1); border: 1px solid rgba(40, 167, 69, 0.3); margin-bottom: 1.5rem;">
@@ -470,12 +589,20 @@ elif "Issue Equipment" in menu:
         unsafe_allow_html=True,
     )
 
+    # --------------------------------------------------------------------------
+    # TOPIC: FETCH AVAILABLE EQUIPMENT FOR ISSUE
+    # Purpose: Filters inventory to only items that have stock > 0 and Active status.
+    # --------------------------------------------------------------------------
     avail_eq = db.get_all_equipment()
     avail_eq = avail_eq[(avail_eq["available_qty"] > 0) & (avail_eq["status"] == "Active")]
 
     if avail_eq.empty:
         st.warning("⚠️ No equipment is currently in stock or available for issue.")
     else:
+        # ----------------------------------------------------------------------
+        # TOPIC: CATEGORY & LOCATION FILTERS FOR ISSUE SELECTION
+        # Purpose: Narrow down equipment options by hardware category and lab room.
+        # ----------------------------------------------------------------------
         f_col1, f_col2 = st.columns(2)
         with f_col1:
             sel_cat = st.selectbox(
@@ -499,6 +626,11 @@ elif "Issue Equipment" in menu:
         if filtered_avail.empty:
             st.info("No items match the selected category/lab filter.")
         else:
+            # ------------------------------------------------------------------
+            # TOPIC: STUDENT ISSUE SUBMISSION FORM
+            # Purpose: Collects purpose of borrowing, confirms return policy agreement,
+            #          and invokes db.issue_equipment.
+            # ------------------------------------------------------------------
             with st.form("student_issue_form"):
                 eq_options = [
                     f"{row['equipment_id']} - {row['name']} ({row['lab_name']}, {row['available_qty']} in stock)"
@@ -542,7 +674,10 @@ elif "Issue Equipment" in menu:
                         else:
                             st.error(f"❌ {msg}")
 
-    # Bottom summary of student's active items
+    # --------------------------------------------------------------------------
+    # TOPIC: CURRENT POSSESSION PREVIEW
+    # Purpose: Shows summary list of items the student currently possesses.
+    # --------------------------------------------------------------------------
     st.markdown("---")
     st.subheader("📌 Equipment Currently in Your Possession")
     s_df = db.get_student_transactions(roll_no=st.session_state.get("roll_no"), student_name=st.session_state.get("full_name"))
@@ -552,11 +687,19 @@ elif "Issue Equipment" in menu:
     else:
         st.info("You do not have any equipment currently issued. Select an item above to issue!")
 
-# --- STUDENT: MY BORROWED ITEMS & HISTORY ---
+# ==============================================================================
+# SECTION: STUDENT BORROWED ITEMS & RETURN HISTORY
+# Purpose: Gives students visibility into their active hardware borrowings,
+#          return protocols, and historical transaction logs.
+# ==============================================================================
 elif "My Borrowed Items" in menu:
     st.title("📋 My Borrowed Items & History")
     st.caption("Track all equipment currently issued to you and review past return transactions.")
 
+    # --------------------------------------------------------------------------
+    # TOPIC: FETCH STUDENT BORROWING RECORDS & METRICS
+    # Purpose: Calculates counts of active items, returned items, and lifetime total.
+    # --------------------------------------------------------------------------
     s_df = db.get_student_transactions(roll_no=st.session_state.get("roll_no"), student_name=st.session_state.get("full_name"))
     active_items = s_df[s_df["status"] == "Issued"] if not s_df.empty else pd.DataFrame()
     returned_items = s_df[s_df["status"] == "Returned"] if not s_df.empty else pd.DataFrame()
@@ -566,6 +709,10 @@ elif "My Borrowed Items" in menu:
     m2.metric("Successfully Returned", len(returned_items))
     m3.metric("Total Items Borrowed", len(s_df) if not s_df.empty else 0)
 
+    # --------------------------------------------------------------------------
+    # TOPIC: CURRENTLY ACTIVE BORROWINGS & RETURN GUIDANCE
+    # Purpose: Lists active hardware with instructions on returning at the counter.
+    # --------------------------------------------------------------------------
     st.markdown("---")
     st.subheader("📦 Currently Active Borrowings")
     if not active_items.empty:
@@ -577,6 +724,10 @@ elif "My Borrowed Items" in menu:
     else:
         st.success("✅ You have no active equipment borrowings. All items have been returned!")
 
+    # --------------------------------------------------------------------------
+    # TOPIC: COMPLETE RETURN HISTORY LOG
+    # Purpose: Historical record of previously returned equipment and conditions.
+    # --------------------------------------------------------------------------
     st.markdown("---")
     st.subheader("📜 Return History & Past Transactions")
     if not returned_items.empty:
@@ -584,11 +735,19 @@ elif "My Borrowed Items" in menu:
     else:
         st.info("No past returned transactions found.")
 
-# --- ADMIN / FACULTY: ISSUE & RETURN ---
+# ==============================================================================
+# SECTION: MODULE 3 (M3) - ADMIN / FACULTY ISSUE & RETURN MANAGEMENT
+# Purpose: Enables Lab Attendants and Faculty to manually issue components to students
+#          and process physical returns with condition verification (Good/Damaged/Lost).
+# ==============================================================================
 elif "Issue & Return" in menu:
     st.title("Equipment Issue & Return Management (Admin / Faculty)")
     tab1, tab2 = st.tabs(["Issue Equipment to Student", "Process Return"])
 
+    # --------------------------------------------------------------------------
+    # TOPIC: TAB 1 - MANUAL EQUIPMENT ISSUE FORM
+    # Purpose: Allows staff to assign equipment directly to any student name and roll number.
+    # --------------------------------------------------------------------------
     with tab1:
         avail_eq = db.get_all_equipment()
         avail_eq = avail_eq[(avail_eq["available_qty"] > 0) & (avail_eq["status"] == "Active")]
@@ -617,6 +776,10 @@ elif "Issue & Return" in menu:
                 else:
                     st.warning("Please fill out all fields.")
 
+    # --------------------------------------------------------------------------
+    # TOPIC: TAB 2 - RETURN PROCESSING & HARDWARE INSPECTION FORM
+    # Purpose: Closes active borrowing transaction and triggers repair workflow if damaged.
+    # --------------------------------------------------------------------------
     with tab2:
         active_df = db.get_active_issues()
         if not active_df.empty:
@@ -639,10 +802,18 @@ elif "Issue & Return" in menu:
             st.info("No active issued items currently.")
 
 
-# --- M4: MAINTENANCE & DAMAGE MANAGEMENT ---
+# ==============================================================================
+# SECTION: MODULE 4 (M4) - MAINTENANCE & DAMAGE TRACKING
+# Purpose: Tracks equipment under repair, technician assignments, repair history,
+#          and enables Admins to update equipment status upon repair completion.
+# ==============================================================================
 elif "Maintenance" in menu:
     st.title("Maintenance & Repair Tracking")
 
+    # --------------------------------------------------------------------------
+    # TOPIC: MAINTENANCE HISTORY FILTER & DISPLAY
+    # Purpose: Allows filtering repair logs by equipment ID.
+    # --------------------------------------------------------------------------
     eq_df = db.get_all_equipment()
     filter_eq = st.selectbox(
         "Filter History by Component",
@@ -658,6 +829,10 @@ elif "Maintenance" in menu:
 
     st.dataframe(m_df, use_container_width=True)
 
+    # --------------------------------------------------------------------------
+    # TOPIC: ADMIN REPAIR STATUS UPDATE FORM
+    # Purpose: Assigns technician and updates status (Under Repair, Repaired, Scrapped).
+    # --------------------------------------------------------------------------
     pending = m_df[m_df["status"] == "Under Repair"]
     if not pending.empty and st.session_state["user_role"] == "Admin":
         st.subheader("Update Repair Status")
@@ -671,10 +846,17 @@ elif "Maintenance" in menu:
                 st.success("Maintenance log updated.")
                 st.rerun()
 
-# --- M6: 6 DEPARTMENTAL REPORTS & EXPORT ---
+# ==============================================================================
+# SECTION: MODULE 6 (M6) - 6 DEPARTMENTAL AUDIT REPORTS & CSV EXPORT
+# Purpose: Generates standardized departmental audit reports and provides CSV download.
+# ==============================================================================
 elif "Reports" in menu:
     st.title("Departmental Audit Reports & Data Export")
 
+    # --------------------------------------------------------------------------
+    # TOPIC: REPORT TYPE SELECTION & SQL DATA FETCH
+    # Purpose: Executes tailored SQL queries depending on selected report type.
+    # --------------------------------------------------------------------------
     report_type = st.selectbox(
         "Choose Report Type",
         [
@@ -706,6 +888,10 @@ elif "Reports" in menu:
         df = pd.read_sql("SELECT * FROM equipment WHERE available_qty < 3", conn)
     conn.close()
 
+    # --------------------------------------------------------------------------
+    # TOPIC: REPORT PREVIEW & CSV DOWNLOAD BUTTON
+    # Purpose: Displays generated report table and allows downloading UTF-8 encoded CSV.
+    # --------------------------------------------------------------------------
     st.dataframe(df, use_container_width=True)
     st.download_button(
         label="Download Report as CSV",
@@ -714,7 +900,11 @@ elif "Reports" in menu:
         mime="text/csv",
     )
 
-# --- M7: AI LAB ASSISTANT ---
+# ==============================================================================
+# SECTION: MODULE 7 (M7) - AI LAB ASSISTANT & PROJECT BOM ENGINE
+# Purpose: Natural language chatbot and Bill of Materials recommendation engine
+#          mapped dynamically to real-time departmental hardware stock and lab rooms.
+# ==============================================================================
 elif "AI Lab Assistant" in menu:
     import difflib
 
@@ -725,6 +915,10 @@ elif "AI Lab Assistant" in menu:
 
     eq_df = db.get_all_equipment()
 
+    # --------------------------------------------------------------------------
+    # TOPIC: ENGINEERING PROJECT TEMPLATES KNOWLEDGE BASE
+    # Purpose: Curated engineering projects mapped to required parts, sensors, and principles.
+    # --------------------------------------------------------------------------
     PROJECT_TEMPLATES = {
         "Laser Security Alarm System": {
             "description": "Optical tripwire intrusion detection system using a laser diode and photoresistor.",
@@ -958,6 +1152,11 @@ elif "AI Lab Assistant" in menu:
         },
     }
 
+    # --------------------------------------------------------------------------
+    # TOPIC: COMPONENT INVENTORY STATUS RESOLVER
+    # Purpose: Matches requested component name against inventory using exact,
+    #          substring, and keyword comparisons, returning real-time availability badges.
+    # --------------------------------------------------------------------------
     def get_component_inventory_status(part_query, current_eq_df):
         match = current_eq_df[
             current_eq_df["name"].str.lower() == part_query.lower()
@@ -1013,6 +1212,11 @@ elif "AI Lab Assistant" in menu:
             "avail_count": 0,
         }
 
+    # --------------------------------------------------------------------------
+    # TOPIC: PROJECT BILL OF MATERIALS (BOM) VIEW RENDERER
+    # Purpose: Computes project readiness KPI metrics, renders required parts table,
+    #          explains circuit principle, and mounts quick-issue buttons for students.
+    # --------------------------------------------------------------------------
     def render_project_bom_view(project_title, project_info, current_eq_df):
         st.subheader(f"🎯 Project Bill of Materials: {project_title}")
         st.markdown(f"*{project_info['description']}*")
@@ -1036,7 +1240,10 @@ elif "AI Lab Assistant" in menu:
                 }
             )
 
-        # KPI Summary cards
+        # ----------------------------------------------------------------------
+        # TOPIC: PROJECT LAB READINESS SCORECARD
+        # Purpose: Visualizes percentage of BOM items currently ready in departmental stock.
+        # ----------------------------------------------------------------------
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Required Items", total_parts)
         k2.metric("Available in Lab", f"{in_stock_parts} / {total_parts}")
@@ -1062,6 +1269,10 @@ elif "AI Lab Assistant" in menu:
         if "principle" in project_info:
             st.info(f"💡 **Working Principle:** {project_info['principle']}")
 
+        # ----------------------------------------------------------------------
+        # TOPIC: STUDENT ONE-CLICK PROJECT HARDWARE ISSUE
+        # Purpose: Allows student to immediately borrow any in-stock part of the project.
+        # ----------------------------------------------------------------------
         if is_student:
             avail_rows = [r for r in rows if "In Stock" in r["Availability Status"] or "Low Stock" in r["Availability Status"]]
             if avail_rows:
@@ -1087,6 +1298,11 @@ elif "AI Lab Assistant" in menu:
 
     import re
 
+    # --------------------------------------------------------------------------
+    # TOPIC: NLP QUERY CLEANER & CONVERSATIONAL NORMALIZER
+    # Purpose: Strips conversational filler phrases ("do we have", "is there any")
+    #          and question marks to isolate the targeted hardware term.
+    # --------------------------------------------------------------------------
     def clean_query_term(text):
         t = text.strip()
         t = re.sub(r"[?!.,;:]", "", t)
@@ -1108,6 +1324,10 @@ elif "AI Lab Assistant" in menu:
             changed = t != prev
         return t
 
+    # --------------------------------------------------------------------------
+    # TOPIC: NLP PROJECT TEMPLATE INTENT MATCHER
+    # Purpose: Scans prompt for project titles and keywords to recognize project queries.
+    # --------------------------------------------------------------------------
     def find_matching_project(prompt, templates):
         p_clean = prompt.lower()
         best_match = None
@@ -1127,6 +1347,10 @@ elif "AI Lab Assistant" in menu:
             return best_match
         return None
 
+    # --------------------------------------------------------------------------
+    # TOPIC: NLP MULTI-COMPONENT MENTION DETECTOR
+    # Purpose: Detects when user asks about multiple equipment items in a single query.
+    # --------------------------------------------------------------------------
     def extract_mentioned_components(prompt, current_eq_df):
         p_clean = prompt.lower()
         matched_items = []
@@ -1144,7 +1368,10 @@ elif "AI Lab Assistant" in menu:
             )
         return pd.DataFrame()
 
-    # --- CHATBOT SEARCH INPUT ---
+    # --------------------------------------------------------------------------
+    # TOPIC: CHATBOT NATURAL LANGUAGE INPUT FIELD
+    # Purpose: Captures free-form student / faculty queries regarding lab items or projects.
+    # --------------------------------------------------------------------------
     user_prompt = st.text_input(
         "Ask the AI Lab Assistant about equipment availability, component stock, storage location, or project requirements:",
         placeholder="e.g. Is drone available? / Do we have ESP32? / What equipments are needed for obstacle avoiding robot?",
@@ -1152,16 +1379,29 @@ elif "AI Lab Assistant" in menu:
 
     st.markdown("---")
 
+    # --------------------------------------------------------------------------
+    # TOPIC: AI QUERY ROUTER & INTENT DISPATCH ENGINE
+    # Purpose: Routes user query across project templates, multi-item inquiries,
+    #          and single component fuzzy searches.
+    # --------------------------------------------------------------------------
     if eq_df.empty:
         st.warning("Inventory records are empty.")
     elif user_prompt:
         p = user_prompt.strip().lower()
 
+        # ----------------------------------------------------------------------
+        # BRANCH 1: DIRECT ENGINEERING PROJECT MATCH
+        # Purpose: Renders Bill of Materials when a recognized project name is queried.
+        # ----------------------------------------------------------------------
         matched_proj = find_matching_project(p, PROJECT_TEMPLATES)
         if matched_proj:
             title, info = matched_proj
             render_project_bom_view(title, info, eq_df)
 
+        # ----------------------------------------------------------------------
+        # BRANCH 2: GENERAL PROJECT QUESTION & INTERACTIVE PROJECT SELECTOR
+        # Purpose: Prompts user with available project cards when they ask about projects broadly.
+        # ----------------------------------------------------------------------
         elif any(
             term in p
             for term in [
@@ -1193,8 +1433,11 @@ elif "AI Lab Assistant" in menu:
                     eq_df,
                 )
 
+        # ----------------------------------------------------------------------
+        # BRANCH 3: MULTIPLE COMPONENTS AVAILABILITY INSPECTOR
+        # Purpose: Formats an availability table when multiple items are detected in one query.
+        # ----------------------------------------------------------------------
         else:
-            # Check if multiple components are mentioned
             comp_matches = extract_mentioned_components(p, eq_df)
             if not comp_matches.empty:
                 st.subheader("🔍 Matching Equipment Availability")
@@ -1255,8 +1498,11 @@ elif "AI Lab Assistant" in menu:
                                 else:
                                     st.error(msg)
 
+            # ------------------------------------------------------------------
+            # BRANCH 4: SINGLE COMPONENT EXACT & FUZZY MATCH ENGINE
+            # Purpose: Resolves individual hardware inquiries using exact, substring, and difflib matching.
+            # ------------------------------------------------------------------
             else:
-                # Single component match
                 all_names = eq_df["name"].tolist()
                 matched_row = None
 
@@ -1290,6 +1536,10 @@ elif "AI Lab Assistant" in menu:
                             ].iloc[0]
                             break
 
+                # --------------------------------------------------------------
+                # SUB-TOPIC: COMPONENT INVENTORY REPORT & ISSUE ACTION
+                # Purpose: Displays stock status card and one-click issue button if in stock.
+                # --------------------------------------------------------------
                 if matched_row is not None:
                     item_name = matched_row["name"]
                     avail = int(matched_row["available_qty"])
@@ -1330,8 +1580,12 @@ elif "AI Lab Assistant" in menu:
                         col1.metric("Available Stock", f"0 / {total} units")
                         col2.metric("Storage Location", lab)
                         col3.metric("Status", "Out of Stock")
+
+                # --------------------------------------------------------------
+                # SUB-TOPIC: UNREGISTERED / MISSING HARDWARE ADVISORY
+                # Purpose: Advises user when requested item is not found in department stock.
+                # --------------------------------------------------------------
                 else:
-                    # Equipment is NOT in inventory
                     searched_name = clean_query_term(user_prompt)
                     query_display = searched_name.title() if searched_name else user_prompt
                     st.error(
@@ -1339,5 +1593,6 @@ elif "AI Lab Assistant" in menu:
                         f"This item is not stocked or registered in any departmental lab (IoT Lab, Hardware Lab, Network Lab). "
                         "Please check with the lab attendant or faculty in-charge if your project requires this equipment."
                     )
+
 
 
