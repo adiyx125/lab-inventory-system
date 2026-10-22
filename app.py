@@ -164,6 +164,32 @@ st.sidebar.caption(
     + (f" | Roll No: **{st.session_state['roll_no']}**" if st.session_state.get("roll_no") else "")
 )
 st.sidebar.caption(f"Dept: **{st.session_state.get('department', 'Information Technology')}**")
+
+# ------------------------------------------------------------------------------
+# TOPIC: SIDEBAR DEADLINE ALERT BADGES
+# Purpose: Highlights urgent overdue or near-deadline items directly in the navigation bar.
+# ------------------------------------------------------------------------------
+if is_student:
+    user_deadline_alerts = db.get_deadline_alerts(
+        roll_no=st.session_state.get("roll_no"),
+        student_name=st.session_state.get("full_name"),
+    )
+    overdue_count = sum(1 for a in user_deadline_alerts if a["urgency"] in ("overdue", "due_today"))
+    duesoon_count = sum(1 for a in user_deadline_alerts if a["urgency"] == "due_soon")
+    if overdue_count > 0:
+        st.sidebar.error(f"🚨 **{overdue_count} Overdue Item{'s' if overdue_count > 1 else ''}!**")
+    elif duesoon_count > 0:
+        st.sidebar.warning(f"⚠️ **{duesoon_count} Item{'s' if duesoon_count > 1 else ''} Due Soon!**")
+else:
+    user_deadline_alerts = []
+    all_deadline_alerts = db.get_deadline_alerts()
+    dept_overdue_count = sum(1 for a in all_deadline_alerts if a["urgency"] in ("overdue", "due_today"))
+    dept_duesoon_count = sum(1 for a in all_deadline_alerts if a["urgency"] == "due_soon")
+    if dept_overdue_count > 0:
+        st.sidebar.error(f"🚨 **{dept_overdue_count} Dept Overdue**")
+    elif dept_duesoon_count > 0:
+        st.sidebar.warning(f"⚠️ **{dept_duesoon_count} Dept Due Soon**")
+
 st.sidebar.markdown("---")
 
 # ------------------------------------------------------------------------------
@@ -212,6 +238,27 @@ if st.sidebar.button("Logout", use_container_width=True):
     st.rerun()
 
 # ==============================================================================
+# TOPIC: GLOBAL RETURN DEADLINE ALARMS & WARNING NOTIFICATIONS
+# Purpose: Displays high-priority warning cards whenever a student has equipment
+#          nearing return deadline or past due date, on every page.
+# ==============================================================================
+if is_student and user_deadline_alerts:
+    for alert in user_deadline_alerts:
+        if alert["urgency"] in ("overdue", "due_today"):
+            st.error(
+                f"🚨 **RETURN DEADLINE EXPIRED (ALARM):** **{alert['equipment_name']}** (`{alert['equipment_id']}`) "
+                f"is **{alert['status_text']}** (Deadline: **{alert['due_date']}** | Borrowed for: {alert['duration_days']} days). "
+                f"Please physically return this hardware component immediately to the **{alert['lab_name']}** counter."
+            )
+        else:
+            st.warning(
+                f"⚠️ **UPCOMING RETURN DEADLINE WARNING:** **{alert['equipment_name']}** (`{alert['equipment_id']}`) "
+                f"is **{alert['status_text']}** (Deadline: **{alert['due_date']}** | Borrowed for: {alert['duration_days']} days). "
+                f"Please finish experiments and prepare to return it to the **{alert['lab_name']}** counter."
+            )
+
+
+# ==============================================================================
 # SECTION: MODULE 5 (M5) - DASHBOARD & REAL-TIME ANALYTICS
 # Purpose: Aggregates laboratory metrics, stock availability, active borrowings,
 #          damaged items, and visual charts for departmental oversight.
@@ -226,6 +273,7 @@ if "Dashboard" in menu:
     eq_df = db.get_all_equipment()
     trans_df = db.get_active_issues()
     maint_df = db.get_maintenance_records()
+    dept_alerts_all = db.get_deadline_alerts()
 
     total_assets = eq_df["total_qty"].sum() if not eq_df.empty else 0
     available_assets = eq_df["available_qty"].sum() if not eq_df.empty else 0
@@ -234,17 +282,25 @@ if "Dashboard" in menu:
         len(maint_df[maint_df["status"] == "Under Repair"]) if not maint_df.empty else 0
     )
     low_stock_count = len(eq_df[eq_df["available_qty"] < 3]) if not eq_df.empty else 0
+    overdue_issues_cnt = sum(1 for a in dept_alerts_all if a["urgency"] in ("overdue", "due_today"))
+    duesoon_issues_cnt = sum(1 for a in dept_alerts_all if a["urgency"] == "due_soon")
 
     # --------------------------------------------------------------------------
     # TOPIC: TOP-LEVEL KPI METRIC SCORECARDS
-    # Purpose: Shows summary cards for total assets, stock, issued items, repairs, and low stock.
+    # Purpose: Shows summary cards for total assets, stock, issued items, deadlines, repairs, and low stock.
     # --------------------------------------------------------------------------
-    k1, k2, k3, k4, k5 = st.columns(5)
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
     k1.metric("Total Assets", total_assets)
     k2.metric("Available Stock", available_assets)
     k3.metric("Currently Issued", issued_count)
-    k4.metric("Under Repair", under_repair_count)
-    k5.metric(
+    k4.metric(
+        "🚨 Overdue / Due Soon",
+        f"{overdue_issues_cnt} / {duesoon_issues_cnt}",
+        delta=-overdue_issues_cnt if overdue_issues_cnt > 0 else 0,
+        delta_color="inverse",
+    )
+    k5.metric("Under Repair", under_repair_count)
+    k6.metric(
         "Low Stock (<3)",
         low_stock_count,
         delta=-low_stock_count if low_stock_count > 0 else 0,
@@ -306,6 +362,27 @@ if "Dashboard" in menu:
             ax.set_ylabel("Total Units")
             plt.xticks(rotation=25, ha="right")
             st.pyplot(fig)
+
+    # --------------------------------------------------------------------------
+    # TOPIC: DEADLINE MONITORING & ACTIVE ALARMS AUDIT
+    # Purpose: Live tracking of student return deadlines, overdue components, and urgency.
+    # --------------------------------------------------------------------------
+    st.markdown("---")
+    st.subheader("🚨 Equipment Return Deadlines & Department Alarms")
+    st.caption("Active monitoring of borrowed laboratory components, calculated return deadlines, and overdue alarm statuses.")
+
+    if dept_alerts_all:
+        if overdue_issues_cnt > 0:
+            st.error(f"🚨 **Urgent Action Required:** There are **{overdue_issues_cnt} equipment borrowing(s)** past deadline! Student notification or follow-up needed.")
+        elif duesoon_issues_cnt > 0:
+            st.warning(f"⚠️ **Upcoming Deadlines Notice:** **{duesoon_issues_cnt} equipment item(s)** are due within the next 3 days.")
+
+        alerts_df = pd.DataFrame(dept_alerts_all)
+        display_alerts = alerts_df[["student_name", "roll_no", "equipment_name", "equipment_id", "lab_name", "issue_date", "duration_days", "due_date", "status_text"]].copy()
+        display_alerts.columns = ["Student Name", "Roll No", "Component Name", "Equipment ID", "Lab Counter", "Issue Date", "Duration (Days)", "Return Deadline", "Deadline Status / Alarm"]
+        st.dataframe(display_alerts, use_container_width=True, hide_index=True)
+    else:
+        st.success("✅ All issued laboratory equipment is currently within schedule. No overdue items or urgent deadline alarms!")
 
 # ==============================================================================
 # SECTION: MODULE 2 (M2) - EQUIPMENT CATALOG & INVENTORY (FULL CRUD + FILTER)
@@ -557,7 +634,7 @@ elif "Issue Equipment" in menu:
 
     # --------------------------------------------------------------------------
     # TOPIC: ISSUE SUCCESS NOTIFICATION & PHYSICAL PICKUP REMINDER
-    # Purpose: Shows confirmation of successful issue and reminds student of lab pickup desk.
+    # Purpose: Shows confirmation of successful issue and reminds student of lab pickup desk and deadline.
     # --------------------------------------------------------------------------
     if st.session_state.get("issue_success_alert"):
         alert_data = st.session_state["issue_success_alert"]
@@ -565,7 +642,9 @@ elif "Issue Equipment" in menu:
             f"🎉 **{alert_data['name']}** (`{alert_data['id']}`) issued successfully to **{alert_data['student']}** ({alert_data['roll_no']})!"
         )
         st.info(
-            f"📍 **Collection Counter:** Please collect your hardware component from the **{alert_data['lab']}** counter by presenting your Student ID."
+            f"📍 **Collection Desk:** Please collect your hardware from the **{alert_data['lab']}** counter by presenting your Student ID.\n\n"
+            f"⏳ **Issued Duration:** **{alert_data.get('duration_days', 7)} Days** &nbsp;|&nbsp; 🎯 **Return Deadline:** **{alert_data.get('due_date', 'N/A')}**\n\n"
+            f"🔔 *System notice: You will receive automated warning alarms as this item nears the deadline date.*"
         )
         if st.button("Dismiss Notification", key="dismiss_issue_alert_btn"):
             del st.session_state["issue_success_alert"]
@@ -627,8 +706,8 @@ elif "Issue Equipment" in menu:
             st.info("No items match the selected category/lab filter.")
         else:
             # ------------------------------------------------------------------
-            # TOPIC: STUDENT ISSUE SUBMISSION FORM
-            # Purpose: Collects purpose of borrowing, confirms return policy agreement,
+            # TOPIC: STUDENT ISSUE SUBMISSION FORM WITH DURATION & DEADLINE
+            # Purpose: Collects item choice, purpose, duration (1-90 days), confirms policy,
             #          and invokes db.issue_equipment.
             # ------------------------------------------------------------------
             with st.form("student_issue_form"):
@@ -647,7 +726,48 @@ elif "Issue Equipment" in menu:
                         "Self Learning / Research",
                     ],
                 )
-                agree = st.checkbox("I agree to return this component in good condition upon project/practical completion.", value=True)
+
+                st.markdown("##### ⏱️ Borrowing Time Duration (Maximum Limit: 90 Days)")
+                st.caption("Select a standard preset duration (1, 7, 30, 60, 90 days) or specify any custom duration up to 90 days.")
+
+                dur_col1, dur_col2 = st.columns([1.5, 1])
+                with dur_col1:
+                    preset_dur = st.selectbox(
+                        "Duration Presets",
+                        [
+                            "7 Days (1 Week - Standard Lab Practical)",
+                            "1 Day (24hr / Quick Overnight Practical)",
+                            "30 Days (1 Month - Mini Project)",
+                            "60 Days (2 Months - Mid-Term Project)",
+                            "90 Days (Maximum Allowed Academic Semester)",
+                            "Custom Specific Duration (1 to 90 Days)",
+                        ],
+                        key="student_preset_dur",
+                    )
+                with dur_col2:
+                    custom_dur_days = st.number_input(
+                        "Custom Duration (1 - 90 Days)",
+                        min_value=1,
+                        max_value=90,
+                        value=7,
+                        step=1,
+                        key="student_custom_dur",
+                        help="Enter any specific number of days between 1 and 90 (applies when Custom is selected).",
+                    )
+
+                if preset_dur.startswith("Custom"):
+                    final_dur = int(custom_dur_days)
+                else:
+                    final_dur = int(preset_dur.split(" ")[0])
+
+                from datetime import datetime, timedelta
+                preview_due = (datetime.now() + timedelta(days=final_dur)).strftime("%Y-%m-%d")
+                st.info(f"📅 **Selected Duration:** {final_dur} Day{'s' if final_dur > 1 else ''} &nbsp;|&nbsp; 🎯 **Calculated Return Deadline:** **{preview_due}**")
+
+                agree = st.checkbox(
+                    f"I agree to return this component in good condition on or before {preview_due} ({final_dur} days).",
+                    value=True,
+                )
 
                 issue_submit = st.form_submit_button("🚀 Confirm & Issue Equipment", use_container_width=True, type="primary")
 
@@ -661,29 +781,60 @@ elif "Issue Equipment" in menu:
                             st.session_state.get("full_name"),
                             st.session_state.get("roll_no"),
                             selected_eq_id,
+                            duration_days=final_dur,
                         )
                         if ok:
+                            calc_due = (datetime.now() + timedelta(days=final_dur)).strftime("%Y-%m-%d")
                             st.session_state["issue_success_alert"] = {
                                 "name": selected_row["name"],
                                 "id": selected_eq_id,
                                 "student": st.session_state.get("full_name"),
                                 "roll_no": st.session_state.get("roll_no"),
                                 "lab": selected_row["lab_name"],
+                                "duration_days": final_dur,
+                                "due_date": calc_due,
                             }
                             st.rerun()
                         else:
                             st.error(f"❌ {msg}")
 
     # --------------------------------------------------------------------------
-    # TOPIC: CURRENT POSSESSION PREVIEW
-    # Purpose: Shows summary list of items the student currently possesses.
+    # TOPIC: CURRENT POSSESSION PREVIEW WITH DEADLINE TIMERS
+    # Purpose: Shows summary list of items the student currently possesses and their deadlines.
     # --------------------------------------------------------------------------
     st.markdown("---")
     st.subheader("📌 Equipment Currently in Your Possession")
     s_df = db.get_student_transactions(roll_no=st.session_state.get("roll_no"), student_name=st.session_state.get("full_name"))
     active_s = s_df[s_df["status"] == "Issued"] if not s_df.empty else pd.DataFrame()
     if not active_s.empty:
-        st.dataframe(active_s, use_container_width=True, hide_index=True)
+        active_s_enriched = db.format_deadline_dataframe(active_s)
+        cols_to_show = [
+            c for c in [
+                "transaction_id",
+                "equipment_name",
+                "equipment_id",
+                "lab_name",
+                "issue_date",
+                "duration_days",
+                "due_date",
+                "Deadline Status",
+            ] if c in active_s_enriched.columns
+        ]
+        rename_map = {
+            "transaction_id": "Tx ID",
+            "equipment_name": "Equipment Name",
+            "equipment_id": "Equipment ID",
+            "lab_name": "Lab Location",
+            "issue_date": "Issue Date",
+            "duration_days": "Duration (Days)",
+            "due_date": "Return Deadline",
+            "Deadline Status": "Deadline Status / Alarm",
+        }
+        st.dataframe(
+            active_s_enriched[cols_to_show].rename(columns=rename_map),
+            use_container_width=True,
+            hide_index=True,
+        )
     else:
         st.info("You do not have any equipment currently issued. Select an item above to issue!")
 
@@ -697,29 +848,89 @@ elif "My Borrowed Items" in menu:
     st.caption("Track all equipment currently issued to you and review past return transactions.")
 
     # --------------------------------------------------------------------------
-    # TOPIC: FETCH STUDENT BORROWING RECORDS & METRICS
-    # Purpose: Calculates counts of active items, returned items, and lifetime total.
+    # TOPIC: FETCH STUDENT BORROWING RECORDS & DEADLINE METRICS
+    # Purpose: Calculates counts of active items, overdue items, due soon items, and return totals.
     # --------------------------------------------------------------------------
     s_df = db.get_student_transactions(roll_no=st.session_state.get("roll_no"), student_name=st.session_state.get("full_name"))
     active_items = s_df[s_df["status"] == "Issued"] if not s_df.empty else pd.DataFrame()
     returned_items = s_df[s_df["status"] == "Returned"] if not s_df.empty else pd.DataFrame()
 
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Currently in Possession", len(active_items))
-    m2.metric("Successfully Returned", len(returned_items))
-    m3.metric("Total Items Borrowed", len(s_df) if not s_df.empty else 0)
+    active_enriched = db.format_deadline_dataframe(active_items) if not active_items.empty else pd.DataFrame()
+    overdue_items_list = []
+    duesoon_items_list = []
+
+    if not active_enriched.empty:
+        for _, row in active_enriched.iterrows():
+            info = db.compute_deadline_info(row.get("due_date"))
+            if info["urgency"] in ("overdue", "due_today"):
+                overdue_items_list.append(row)
+            elif info["urgency"] == "due_soon":
+                duesoon_items_list.append(row)
+
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("In Possession", len(active_items))
+    m2.metric(
+        "🚨 Overdue",
+        len(overdue_items_list),
+        delta=-len(overdue_items_list) if overdue_items_list else 0,
+        delta_color="inverse",
+    )
+    m3.metric("⚠️ Due Soon (<= 3 Days)", len(duesoon_items_list))
+    m4.metric("Returned", len(returned_items))
+    m5.metric("Lifetime Borrowed", len(s_df) if not s_df.empty else 0)
+
+    # --------------------------------------------------------------------------
+    # TOPIC: DEADLINE ALARM NOTIFICATION CALLOUTS
+    # Purpose: Displays urgent alert banners for student's overdue and due soon hardware.
+    # --------------------------------------------------------------------------
+    if overdue_items_list:
+        st.error(
+            f"🚨 **DEADLINE ALARM: {len(overdue_items_list)} component(s) have passed their return deadline!** "
+            "Please return these physical components to the laboratory counter immediately to prevent academic holds."
+        )
+    if duesoon_items_list:
+        st.warning(
+            f"⚠️ **DEADLINE WARNING: {len(duesoon_items_list)} component(s) are approaching their deadline (within 3 days).** "
+            "Please ensure testing is completed and components are prepared for return."
+        )
 
     # --------------------------------------------------------------------------
     # TOPIC: CURRENTLY ACTIVE BORROWINGS & RETURN GUIDANCE
-    # Purpose: Lists active hardware with instructions on returning at the counter.
+    # Purpose: Lists active hardware with return deadlines, countdowns, and return desk info.
     # --------------------------------------------------------------------------
     st.markdown("---")
-    st.subheader("📦 Currently Active Borrowings")
-    if not active_items.empty:
-        st.dataframe(active_items, use_container_width=True, hide_index=True)
+    st.subheader("📦 Currently Active Borrowings & Deadlines")
+    if not active_enriched.empty:
+        cols_to_show = [
+            c for c in [
+                "transaction_id",
+                "equipment_name",
+                "equipment_id",
+                "lab_name",
+                "issue_date",
+                "duration_days",
+                "due_date",
+                "Deadline Status",
+            ] if c in active_enriched.columns
+        ]
+        rename_map = {
+            "transaction_id": "Tx ID",
+            "equipment_name": "Equipment Name",
+            "equipment_id": "Equipment ID",
+            "lab_name": "Lab Location",
+            "issue_date": "Issue Date",
+            "duration_days": "Duration (Days)",
+            "due_date": "Return Deadline",
+            "Deadline Status": "Deadline Status / Alarm",
+        }
+        st.dataframe(
+            active_enriched[cols_to_show].rename(columns=rename_map),
+            use_container_width=True,
+            hide_index=True,
+        )
         st.info(
-            "ℹ️ **Hardware Return Policy:** To return borrowed components, please submit the physical hardware to the **Lab Attendant or Faculty in-charge** at the department counter. "
-            "The attendant will physically inspect the equipment condition (Good / Damaged) and officially record the return in the system."
+            "ℹ️ **Hardware Return Policy:** To return borrowed components, please submit physical hardware to the **Lab Attendant or Faculty in-charge** at the designated counter. "
+            "The attendant will physically inspect condition (Good / Damaged / Lost) and officially record return in the system."
         )
     else:
         st.success("✅ You have no active equipment borrowings. All items have been returned!")
@@ -731,7 +942,33 @@ elif "My Borrowed Items" in menu:
     st.markdown("---")
     st.subheader("📜 Return History & Past Transactions")
     if not returned_items.empty:
-        st.dataframe(returned_items, use_container_width=True, hide_index=True)
+        ret_cols = [
+            c for c in [
+                "transaction_id",
+                "equipment_name",
+                "equipment_id",
+                "issue_date",
+                "duration_days",
+                "due_date",
+                "return_date",
+                "condition_on_return",
+            ] if c in returned_items.columns
+        ]
+        ret_rename = {
+            "transaction_id": "Tx ID",
+            "equipment_name": "Equipment Name",
+            "equipment_id": "Equipment ID",
+            "issue_date": "Issue Date",
+            "duration_days": "Duration (Days)",
+            "due_date": "Expected Due Date",
+            "return_date": "Actual Return Date",
+            "condition_on_return": "Condition on Return",
+        }
+        st.dataframe(
+            returned_items[ret_cols].rename(columns=ret_rename),
+            use_container_width=True,
+            hide_index=True,
+        )
     else:
         st.info("No past returned transactions found.")
 
@@ -753,45 +990,124 @@ elif "Issue & Return" in menu:
         avail_eq = avail_eq[(avail_eq["available_qty"] > 0) & (avail_eq["status"] == "Active")]
 
         with st.form("admin_issue_form"):
-            s_name = st.text_input("Student Full Name")
+            s_name = st.text_input("Student Full Name", placeholder="e.g. Aditya Yadav")
             roll_no = st.text_input("Roll Number (e.g., 125A3125)")
             selected_eq = st.selectbox(
                 "Select Component",
                 (
-                    avail_eq["equipment_id"] + " - " + avail_eq["name"] + " (" + avail_eq["lab_name"] + ")"
+                    avail_eq["equipment_id"] + " - " + avail_eq["name"] + " (" + avail_eq["lab_name"] + ", " + avail_eq["available_qty"].astype(str) + " in stock)"
                     if not avail_eq.empty
                     else ["No Available Items"]
                 ),
             )
 
-            if st.form_submit_button("Issue Equipment", type="primary"):
+            st.markdown("##### ⏱️ Borrowing Duration (Maximum Limit: 90 Days)")
+            st.caption("Standard department durations: 1, 7, 30, 60, 90 days or enter any custom time duration up to 90 days.")
+
+            ad_col1, ad_col2 = st.columns([1.5, 1])
+            with ad_col1:
+                admin_dur_preset = st.selectbox(
+                    "Select Duration Preset",
+                    [
+                        "7 Days (1 Week - Standard Lab Practical)",
+                        "1 Day (Overnight / Urgent 24hr Practical)",
+                        "30 Days (1 Month - Mini Project)",
+                        "60 Days (2 Months - Mid-Term Project)",
+                        "90 Days (Maximum Academic Limit)",
+                        "Custom Specific Duration (1 to 90 Days)",
+                    ],
+                    key="admin_dur_preset_sel",
+                )
+            with ad_col2:
+                admin_custom_days = st.number_input(
+                    "Custom Duration (1 - 90 Days)",
+                    min_value=1,
+                    max_value=90,
+                    value=7,
+                    step=1,
+                    key="admin_custom_days_input",
+                )
+
+            if admin_dur_preset.startswith("Custom"):
+                chosen_admin_dur = int(admin_custom_days)
+            else:
+                chosen_admin_dur = int(admin_dur_preset.split(" ")[0])
+
+            from datetime import datetime, timedelta
+            admin_due_date = (datetime.now() + timedelta(days=chosen_admin_dur)).strftime("%Y-%m-%d")
+            st.info(f"📅 **Duration:** {chosen_admin_dur} Day{'s' if chosen_admin_dur > 1 else ''} &nbsp;|&nbsp; 🎯 **Return Deadline:** **{admin_due_date}**")
+
+            if st.form_submit_button("🚀 Issue Equipment to Student", type="primary"):
                 if s_name and roll_no and selected_eq != "No Available Items":
                     eq_id = selected_eq.split(" - ")[0]
-                    ok, msg = db.issue_equipment(s_name, roll_no, eq_id)
+                    ok, msg = db.issue_equipment(s_name.strip(), roll_no.strip(), eq_id, duration_days=chosen_admin_dur)
                     if ok:
-                        st.success(msg)
+                        st.success(f"🎉 {msg}")
                         st.rerun()
                     else:
                         st.error(msg)
                 else:
-                    st.warning("Please fill out all fields.")
+                    st.warning("Please fill out all required fields.")
 
     # --------------------------------------------------------------------------
     # TOPIC: TAB 2 - RETURN PROCESSING & HARDWARE INSPECTION FORM
-    # Purpose: Closes active borrowing transaction and triggers repair workflow if damaged.
+    # Purpose: Closes active borrowing transaction, audits deadlines, and triggers repair workflow if damaged.
     # --------------------------------------------------------------------------
     with tab2:
         active_df = db.get_active_issues()
         if not active_df.empty:
-            st.dataframe(active_df, use_container_width=True)
+            active_enriched = db.format_deadline_dataframe(active_df)
+
+            overdue_cnt = sum(1 for _, r in active_enriched.iterrows() if db.compute_deadline_info(r.get("due_date"))["urgency"] in ("overdue", "due_today"))
+            duesoon_cnt = sum(1 for _, r in active_enriched.iterrows() if db.compute_deadline_info(r.get("due_date"))["urgency"] == "due_soon")
+
+            if overdue_cnt > 0:
+                st.error(f"🚨 **Department Overdue Alert:** {overdue_cnt} borrowed component(s) are past their return deadline date!")
+            elif duesoon_cnt > 0:
+                st.warning(f"⚠️ **Upcoming Deadlines Notice:** {duesoon_cnt} component(s) are due within the next 3 days.")
+
+            display_cols = [
+                c for c in [
+                    "transaction_id",
+                    "student_name",
+                    "roll_no",
+                    "equipment_name",
+                    "equipment_id",
+                    "lab_name",
+                    "issue_date",
+                    "duration_days",
+                    "due_date",
+                    "Deadline Status",
+                ] if c in active_enriched.columns
+            ]
+            rename_dict = {
+                "transaction_id": "Tx ID",
+                "student_name": "Student Name",
+                "roll_no": "Roll No",
+                "equipment_name": "Component Name",
+                "equipment_id": "Equipment ID",
+                "lab_name": "Lab Location",
+                "issue_date": "Issue Date",
+                "duration_days": "Duration (Days)",
+                "due_date": "Return Deadline",
+                "Deadline Status": "Deadline Status / Alarm",
+            }
+            st.dataframe(active_enriched[display_cols].rename(columns=rename_dict), use_container_width=True, hide_index=True)
+
             with st.form("admin_return_form"):
-                t_id = st.selectbox(
-                    "Select Transaction ID to Return", active_df["transaction_id"].tolist()
+                ret_options = [
+                    f"T-{row['transaction_id']}: {row['student_name']} ({row['roll_no']}) - {row['equipment_name']} [{row.get('Deadline Status', 'Issued')}]"
+                    for _, row in active_enriched.iterrows()
+                ]
+                selected_ret_str = st.selectbox(
+                    "Select Borrowing Record to Process Return",
+                    ret_options,
                 )
                 condition = st.selectbox(
-                    "Condition on Return", ["Good", "Damaged", "Lost"]
+                    "Inspected Condition on Return", ["Good", "Damaged", "Lost"]
                 )
-                if st.form_submit_button("Confirm Return", type="primary"):
+                if st.form_submit_button("Confirm & Record Return", type="primary"):
+                    t_id = int(selected_ret_str.split(":")[0].replace("T-", "").strip())
                     ok, msg = db.return_equipment(t_id, condition)
                     if ok:
                         st.success(msg)
@@ -799,7 +1115,7 @@ elif "Issue & Return" in menu:
                     else:
                         st.error(msg)
         else:
-            st.info("No active issued items currently.")
+            st.info("No active issued items currently in circulation.")
 
 
 # ==============================================================================
@@ -873,7 +1189,7 @@ elif "Reports" in menu:
     if report_type.startswith("1"):
         df = db.get_all_equipment()
     elif report_type.startswith("2"):
-        df = pd.read_sql("SELECT * FROM transactions WHERE status = 'Issued'", conn)
+        df = db.format_deadline_dataframe(db.get_active_issues())
     elif report_type.startswith("3"):
         df = pd.read_sql("SELECT * FROM transactions WHERE status = 'Returned'", conn)
     elif report_type.startswith("4"):
@@ -1277,7 +1593,7 @@ elif "AI Lab Assistant" in menu:
             avail_rows = [r for r in rows if "In Stock" in r["Availability Status"] or "Low Stock" in r["Availability Status"]]
             if avail_rows:
                 st.markdown("##### ⚡ Quick Issue Project Component")
-                p_c1, p_c2 = st.columns([3, 1])
+                p_c1, p_c2, p_c3 = st.columns([2.5, 1.3, 1])
                 with p_c1:
                     chosen_p = st.selectbox(
                         "Select in-stock component for this project to issue to your account:",
@@ -1285,11 +1601,18 @@ elif "AI Lab Assistant" in menu:
                         key=f"bom_quick_issue_{project_title}",
                     )
                 with p_c2:
+                    p_dur = st.selectbox(
+                        "Duration",
+                        ["7 Days", "1 Day", "30 Days", "60 Days", "90 Days"],
+                        key=f"bom_dur_{project_title}",
+                    )
+                with p_c3:
                     st.write("")
                     st.write("")
-                    if st.button("🚀 Issue Component", key=f"btn_p_issue_{project_title}", type="primary", use_container_width=True):
+                    if st.button("🚀 Issue", key=f"btn_p_issue_{project_title}", type="primary", use_container_width=True):
                         p_eq_id = chosen_p.split(" - ")[0]
-                        ok, msg = db.issue_equipment(st.session_state.get("full_name"), st.session_state.get("roll_no"), p_eq_id)
+                        p_days = int(p_dur.split(" ")[0])
+                        ok, msg = db.issue_equipment(st.session_state.get("full_name"), st.session_state.get("roll_no"), p_eq_id, duration_days=p_days)
                         if ok:
                             st.success(f"🎉 Component issued successfully to {st.session_state.get('full_name')} ({st.session_state.get('roll_no')})!")
                             st.rerun()
@@ -1479,7 +1802,7 @@ elif "AI Lab Assistant" in menu:
                     avail_multi = comp_matches[comp_matches["available_qty"] > 0]
                     if not avail_multi.empty:
                         st.markdown("##### ⚡ Quick Issue Found Component")
-                        m_c1, m_c2 = st.columns([3, 1])
+                        m_c1, m_c2, m_c3 = st.columns([2.5, 1.3, 1])
                         with m_c1:
                             m_choice = st.selectbox(
                                 "Select item to issue to your account:",
@@ -1487,11 +1810,18 @@ elif "AI Lab Assistant" in menu:
                                 key="multi_issue_sel",
                             )
                         with m_c2:
+                            m_dur = st.selectbox(
+                                "Duration",
+                                ["7 Days", "1 Day", "30 Days", "60 Days", "90 Days"],
+                                key="multi_issue_dur",
+                            )
+                        with m_c3:
                             st.write("")
                             st.write("")
-                            if st.button("🚀 Issue to My Account", key="multi_issue_btn", type="primary", use_container_width=True):
+                            if st.button("🚀 Issue", key="multi_issue_btn", type="primary", use_container_width=True):
                                 m_id = m_choice.split(" - ")[0]
-                                ok, msg = db.issue_equipment(st.session_state.get("full_name"), st.session_state.get("roll_no"), m_id)
+                                m_days = int(m_dur.split(" ")[0])
+                                ok, msg = db.issue_equipment(st.session_state.get("full_name"), st.session_state.get("roll_no"), m_id, duration_days=m_days)
                                 if ok:
                                     st.success(f"🎉 Item issued successfully to {st.session_state.get('full_name')} ({st.session_state.get('roll_no')})!")
                                     st.rerun()
@@ -1561,13 +1891,24 @@ elif "AI Lab Assistant" in menu:
                         col3.metric("Status", status_str)
 
                         if is_student:
-                            if st.button(f"🚀 Issue {item_name} to My Account", key=f"ai_quick_issue_{matched_row['equipment_id']}", type="primary"):
-                                ok, msg = db.issue_equipment(st.session_state.get("full_name"), st.session_state.get("roll_no"), matched_row['equipment_id'])
-                                if ok:
-                                    st.success(f"🎉 {item_name} issued successfully to {st.session_state.get('full_name')} ({st.session_state.get('roll_no')})!")
-                                    st.rerun()
-                                else:
-                                    st.error(msg)
+                            sq_c1, sq_c2 = st.columns([1.5, 2])
+                            with sq_c1:
+                                s_dur = st.selectbox(
+                                    "Borrowing Duration",
+                                    ["7 Days (Standard)", "1 Day (Overnight)", "30 Days (1 Month)", "60 Days (2 Months)", "90 Days (Maximum)"],
+                                    key=f"single_dur_{matched_row['equipment_id']}",
+                                )
+                            with sq_c2:
+                                st.write("")
+                                st.write("")
+                                if st.button(f"🚀 Issue {item_name}", key=f"ai_quick_issue_{matched_row['equipment_id']}", type="primary"):
+                                    s_days = int(s_dur.split(" ")[0])
+                                    ok, msg = db.issue_equipment(st.session_state.get("full_name"), st.session_state.get("roll_no"), matched_row['equipment_id'], duration_days=s_days)
+                                    if ok:
+                                        st.success(f"🎉 {item_name} issued successfully to {st.session_state.get('full_name')} ({st.session_state.get('roll_no')})!")
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
                     else:
                         st.error(
                             f"❌ **Equipment NOT Available (Out of Stock):** **{item_name}** (`{matched_row['equipment_id']}`) is currently **NOT available** in the lab.\n\n"

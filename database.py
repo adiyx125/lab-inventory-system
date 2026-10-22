@@ -4,7 +4,7 @@
 # ==============================================================================
 import sqlite3
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 
 DB_NAME = "inventory.db"
 
@@ -76,7 +76,8 @@ def init_db():
 
     # --------------------------------------------------------------------------
     # TABLE 3: Equipment Transactions Table (Issues & Returns)
-    # Purpose: Tracks equipment borrowed by students, issue dates, and return statuses.
+    # Purpose: Tracks equipment borrowed by students, duration, return deadline (due_date),
+    #          issue dates, and return statuses.
     # --------------------------------------------------------------------------
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS transactions (
@@ -85,12 +86,38 @@ def init_db():
             roll_no TEXT NOT NULL,
             equipment_id TEXT NOT NULL,
             issue_date TEXT NOT NULL,
+            duration_days INTEGER NOT NULL DEFAULT 7,
+            due_date TEXT NOT NULL DEFAULT '',
             return_date TEXT,
             condition_on_return TEXT,
             status TEXT NOT NULL CHECK(status IN ('Issued', 'Returned')),
             FOREIGN KEY (equipment_id) REFERENCES equipment(equipment_id)
         )
     """)
+
+    # --------------------------------------------------------------------------
+    # SCHEMA MIGRATION: Safe column additions for transactions (duration_days, due_date)
+    # Purpose: Adds duration_days and due_date if upgrading existing database.
+    # --------------------------------------------------------------------------
+    cursor.execute("PRAGMA table_info(transactions)")
+    trans_cols = [c[1] for c in cursor.fetchall()]
+    if "duration_days" not in trans_cols:
+        cursor.execute("ALTER TABLE transactions ADD COLUMN duration_days INTEGER DEFAULT 7")
+    if "due_date" not in trans_cols:
+        cursor.execute("ALTER TABLE transactions ADD COLUMN due_date TEXT DEFAULT ''")
+
+    # Backfill any existing transactions missing due_date
+    cursor.execute("SELECT transaction_id, issue_date, duration_days, due_date FROM transactions WHERE due_date IS NULL OR due_date = ''")
+    rows_to_backfill = cursor.fetchall()
+    for row in rows_to_backfill:
+        t_id, iss_date, dur, _ = row
+        dur = dur if dur is not None and dur > 0 else 7
+        try:
+            iss_dt = datetime.strptime(str(iss_date).strip(), "%Y-%m-%d")
+            calc_due = (iss_dt + timedelta(days=dur)).strftime("%Y-%m-%d")
+        except Exception:
+            calc_due = datetime.now().strftime("%Y-%m-%d")
+        cursor.execute("UPDATE transactions SET duration_days = ?, due_date = ? WHERE transaction_id = ?", (dur, calc_due, t_id))
 
     # --------------------------------------------------------------------------
     # TABLE 4: Maintenance & Damage Logs Table
@@ -187,7 +214,7 @@ def get_student_transactions(roll_no=None, student_name=None):
     conn = get_connection()
     query = """
         SELECT t.transaction_id, t.equipment_id, e.name AS equipment_name, e.lab_name,
-               t.issue_date, t.return_date, t.condition_on_return, t.status
+               t.issue_date, t.duration_days, t.due_date, t.return_date, t.condition_on_return, t.status
         FROM transactions t
         LEFT JOIN equipment e ON t.equipment_id = e.equipment_id
         WHERE (? IS NOT NULL AND t.roll_no = ?) OR (? IS NOT NULL AND t.student_name = ?)
@@ -260,10 +287,10 @@ def get_all_equipment():
 
 # ==============================================================================
 # TOPIC: ISSUE EQUIPMENT TRANSACTION
-# Purpose: Validates stock and status, inserts an 'Issued' transaction record,
-#          and decrements the available stock count by 1.
+# Purpose: Validates stock and status, inserts an 'Issued' transaction record with duration
+#          and calculated deadline due_date, and decrements available stock count by 1.
 # ==============================================================================
-def issue_equipment(student_name, roll_no, eq_id):
+def issue_equipment(student_name, roll_no, eq_id, duration_days=7):
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -283,20 +310,36 @@ def issue_equipment(student_name, roll_no, eq_id):
         return False, f"Cannot issue item currently marked as '{res[1]}'."
 
     # --------------------------------------------------------------------------
-    # STEP 2: Record issue transaction
-    # Purpose: Logs student details, equipment ID, issue date, and 'Issued' status.
+    # STEP 2: Validate duration (1 to 90 days maximum limit)
+    # Purpose: Ensures borrowing window respects academic department duration policy.
     # --------------------------------------------------------------------------
-    today = datetime.now().strftime("%Y-%m-%d")
+    try:
+        duration_days = int(duration_days)
+        if duration_days < 1:
+            duration_days = 1
+        elif duration_days > 90:
+            duration_days = 90
+    except (ValueError, TypeError):
+        duration_days = 7
+
+    today_dt = datetime.now()
+    today = today_dt.strftime("%Y-%m-%d")
+    due_date = (today_dt + timedelta(days=duration_days)).strftime("%Y-%m-%d")
+
+    # --------------------------------------------------------------------------
+    # STEP 3: Record issue transaction with duration and calculated due date
+    # Purpose: Logs student details, equipment ID, issue date, duration, due date, and 'Issued' status.
+    # --------------------------------------------------------------------------
     cursor.execute(
         """
-        INSERT INTO transactions (student_name, roll_no, equipment_id, issue_date, status)
-        VALUES (?, ?, ?, ?, 'Issued')
+        INSERT INTO transactions (student_name, roll_no, equipment_id, issue_date, duration_days, due_date, status)
+        VALUES (?, ?, ?, ?, ?, ?, 'Issued')
     """,
-        (student_name, roll_no, eq_id, today),
+        (student_name, roll_no, eq_id, today, duration_days, due_date),
     )
 
     # --------------------------------------------------------------------------
-    # STEP 3: Decrement available inventory quantity
+    # STEP 4: Decrement available inventory quantity
     # Purpose: Deducts 1 unit from available_qty in equipment table.
     # --------------------------------------------------------------------------
     cursor.execute(
@@ -305,7 +348,7 @@ def issue_equipment(student_name, roll_no, eq_id):
     )
     conn.commit()
     conn.close()
-    return True, "Equipment issued successfully."
+    return True, f"Equipment issued successfully for {duration_days} days (Due: {due_date})."
 
 
 # ==============================================================================
@@ -381,12 +424,21 @@ def return_equipment(trans_id, condition):
 
 
 # ==============================================================================
-# TOPIC: FETCH CURRENT ACTIVE ISSUES
-# Purpose: Returns all transactions currently in 'Issued' status.
+# TOPIC: FETCH CURRENT ACTIVE ISSUES WITH DEADLINES
+# Purpose: Returns all transactions currently in 'Issued' status along with
+#          equipment metadata, issue duration, and return deadline (due_date).
 # ==============================================================================
 def get_active_issues():
     conn = get_connection()
-    df = pd.read_sql("SELECT * FROM transactions WHERE status = 'Issued'", conn)
+    query = """
+        SELECT t.transaction_id, t.student_name, t.roll_no, t.equipment_id, e.name AS equipment_name,
+               e.lab_name, t.issue_date, t.duration_days, t.due_date, t.status
+        FROM transactions t
+        LEFT JOIN equipment e ON t.equipment_id = e.equipment_id
+        WHERE t.status = 'Issued'
+        ORDER BY t.due_date ASC
+    """
+    df = pd.read_sql(query, conn)
     conn.close()
     return df
 
@@ -444,3 +496,166 @@ def update_repair(repair_id, technician, status):
 
     conn.commit()
     conn.close()
+
+
+# ==============================================================================
+# TOPIC: DEADLINE CALCULATION & ALARM ENGINE
+# Purpose: Calculates time remaining until borrowing deadline, flags overdue or
+#          near-deadline equipment, and produces warning badges for UI display.
+# ==============================================================================
+def compute_deadline_info(due_date_str):
+    """
+    Calculates days remaining and status descriptor for a given due_date (YYYY-MM-DD).
+    Returns a dictionary:
+      - days_remaining (int): Negative if overdue, 0 if due today, positive if remaining.
+      - status_text (str): Color-coded human-readable status badge.
+      - urgency (str): 'overdue', 'due_today', 'due_soon', 'safe'.
+      - is_alert (bool): True if item requires student/faculty attention (overdue or <= 3 days).
+    """
+    if not due_date_str:
+        return {
+            "days_remaining": 999,
+            "status_text": "No Deadline Set",
+            "urgency": "safe",
+            "is_alert": False,
+        }
+    try:
+        due_dt = datetime.strptime(str(due_date_str).strip(), "%Y-%m-%d").date()
+        today = datetime.now().date()
+        diff = (due_dt - today).days
+
+        if diff < 0:
+            abs_diff = abs(diff)
+            day_word = "day" if abs_diff == 1 else "days"
+            return {
+                "days_remaining": diff,
+                "status_text": f"🚨 Overdue by {abs_diff} {day_word}!",
+                "urgency": "overdue",
+                "is_alert": True,
+            }
+        elif diff == 0:
+            return {
+                "days_remaining": 0,
+                "status_text": "⏰ Due Today!",
+                "urgency": "due_today",
+                "is_alert": True,
+            }
+        elif diff <= 3:
+            day_word = "day" if diff == 1 else "days"
+            return {
+                "days_remaining": diff,
+                "status_text": f"⚠️ Due in {diff} {day_word}!",
+                "urgency": "due_soon",
+                "is_alert": True,
+            }
+        else:
+            return {
+                "days_remaining": diff,
+                "status_text": f"🟢 {diff} days left",
+                "urgency": "safe",
+                "is_alert": False,
+            }
+    except Exception:
+        return {
+            "days_remaining": 999,
+            "status_text": "Unknown Deadline",
+            "urgency": "safe",
+            "is_alert": False,
+        }
+
+
+# ==============================================================================
+# TOPIC: FETCH DEADLINE ALARMS & WARNINGS
+# Purpose: Retrieves active borrowings that are overdue or nearing their return deadline.
+#          Filters by roll_no / student_name if supplied, or returns department-wide alerts.
+# ==============================================================================
+def get_deadline_alerts(roll_no=None, student_name=None, threshold_days=3):
+    """
+    Returns a list of dicts for active issued items where return deadline is within
+    threshold_days or already passed (overdue).
+    """
+    conn = get_connection()
+    if roll_no or student_name:
+        query = """
+            SELECT t.transaction_id, t.student_name, t.roll_no, t.equipment_id,
+                   e.name AS equipment_name, e.lab_name, t.issue_date, t.duration_days, t.due_date
+            FROM transactions t
+            LEFT JOIN equipment e ON t.equipment_id = e.equipment_id
+            WHERE t.status = 'Issued'
+              AND ((? IS NOT NULL AND t.roll_no = ?) OR (? IS NOT NULL AND t.student_name = ?))
+            ORDER BY t.due_date ASC
+        """
+        df = pd.read_sql(query, conn, params=(roll_no, roll_no, student_name, student_name))
+    else:
+        query = """
+            SELECT t.transaction_id, t.student_name, t.roll_no, t.equipment_id,
+                   e.name AS equipment_name, e.lab_name, t.issue_date, t.duration_days, t.due_date
+            FROM transactions t
+            LEFT JOIN equipment e ON t.equipment_id = e.equipment_id
+            WHERE t.status = 'Issued'
+            ORDER BY t.due_date ASC
+        """
+        df = pd.read_sql(query, conn)
+    conn.close()
+
+    if df.empty:
+        return []
+
+    alerts = []
+    for _, row in df.iterrows():
+        info = compute_deadline_info(row.get("due_date"))
+        if info["is_alert"] or info["days_remaining"] <= threshold_days:
+            alerts.append({
+                "transaction_id": row["transaction_id"],
+                "student_name": row["student_name"],
+                "roll_no": row["roll_no"],
+                "equipment_id": row["equipment_id"],
+                "equipment_name": row["equipment_name"] or row["equipment_id"],
+                "lab_name": row["lab_name"] or "Lab Counter",
+                "issue_date": row["issue_date"],
+                "duration_days": row["duration_days"],
+                "due_date": row["due_date"],
+                "days_remaining": info["days_remaining"],
+                "status_text": info["status_text"],
+                "urgency": info["urgency"],
+            })
+
+    # Sort so most critical items (most days overdue) appear first
+    urgency_ranks = {"overdue": 0, "due_today": 1, "due_soon": 2, "safe": 3}
+    alerts.sort(key=lambda x: (urgency_ranks.get(x["urgency"], 4), x["days_remaining"]))
+    return alerts
+
+
+# ==============================================================================
+# TOPIC: ENRICH DATAFRAME WITH DEADLINE STATUS
+# Purpose: Appends 'Days Remaining' and 'Deadline Status' columns to any table
+#          containing 'due_date' for standardized visual display.
+# ==============================================================================
+def format_deadline_dataframe(df):
+    """
+    Appends 'Days Remaining' and 'Deadline Status' columns to a DataFrame.
+    """
+    if df.empty:
+        return df
+
+    df = df.copy()
+    if "due_date" not in df.columns:
+        return df
+
+    days_list = []
+    status_list = []
+
+    for _, row in df.iterrows():
+        if "status" in df.columns and row.get("status") == "Returned":
+            days_list.append(None)
+            status_list.append("✅ Returned")
+            continue
+
+        info = compute_deadline_info(row.get("due_date"))
+        days_list.append(info["days_remaining"])
+        status_list.append(info["status_text"])
+
+    df["Days Remaining"] = days_list
+    df["Deadline Status"] = status_list
+    return df
+

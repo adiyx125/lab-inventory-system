@@ -4,6 +4,7 @@
 #          real IT department equipment inventory, active borrowings, and maintenance logs.
 # ==============================================================================
 import sqlite3
+from datetime import datetime, timedelta
 from database import init_db
 
 
@@ -898,15 +899,31 @@ def seed():
     # TOPIC: SEED SAMPLE ISSUED TRANSACTIONS (M3 TRANSACTIONS)
     # Purpose: Records active equipment borrowings assigned to real student roll numbers.
     # --------------------------------------------------------------------------
+    # TOPIC: SEED ACTIVE BORROWINGS (M3 TRANSACTIONS & DEADLINES)
+    # Purpose: Records active equipment borrowings with durations (1-90 days)
+    #          and calculated due dates to test Overdue, Due Soon, and Safe alarms.
+    # --------------------------------------------------------------------------
+    now_dt = datetime.now()
+    d_overdue_iss = (now_dt - timedelta(days=20)).strftime("%Y-%m-%d")
+    d_overdue_due = (now_dt - timedelta(days=6)).strftime("%Y-%m-%d")
+
+    d_near_iss = (now_dt - timedelta(days=5)).strftime("%Y-%m-%d")
+    d_near_due = (now_dt + timedelta(days=2)).strftime("%Y-%m-%d")
+
+    d_safe_iss = (now_dt - timedelta(days=2)).strftime("%Y-%m-%d")
+    d_safe_due = (now_dt + timedelta(days=28)).strftime("%Y-%m-%d")
+
     transactions = [
-        ("Aayush Sawant", "125A3091", "EQ-204", "2026-09-15", None, None, "Issued"),
-        ("Arya Warang", "125A3124", "EQ-256", "2026-09-18", None, None, "Issued"),
-        ("Aditya Yadav", "125A3125", "EQ-208", "2026-09-20", None, None, "Issued"),
+        ("Aayush Sawant", "125A3091", "EQ-204", d_overdue_iss, 14, d_overdue_due, None, None, "Issued"),
+        ("Arya Warang", "125A3124", "EQ-256", d_near_iss, 7, d_near_due, None, None, "Issued"),
+        ("Aditya Yadav", "125A3125", "EQ-208", d_near_iss, 7, d_near_due, None, None, "Issued"),
+        ("Aditya Yadav", "125A3125", "EQ-219", d_overdue_iss, 14, d_overdue_due, None, None, "Issued"),
+        ("Aditya Yadav", "125A3125", "EQ-235", d_safe_iss, 30, d_safe_due, None, None, "Issued"),
     ]
     cursor.executemany(
         """
-        INSERT INTO transactions (student_name, roll_no, equipment_id, issue_date, return_date, condition_on_return, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO transactions (student_name, roll_no, equipment_id, issue_date, duration_days, due_date, return_date, condition_on_return, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """,
         transactions,
     )
@@ -916,7 +933,7 @@ def seed():
     # Purpose: Decrements available_qty for the items currently issued above.
     # --------------------------------------------------------------------------
     cursor.execute(
-        "UPDATE equipment SET available_qty = available_qty - 1 WHERE equipment_id IN ('EQ-204', 'EQ-256', 'EQ-208')"
+        "UPDATE equipment SET available_qty = available_qty - 1 WHERE equipment_id IN ('EQ-204', 'EQ-256', 'EQ-208', 'EQ-219', 'EQ-235')"
     )
 
     # --------------------------------------------------------------------------
