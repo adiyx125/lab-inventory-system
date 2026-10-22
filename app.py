@@ -237,26 +237,6 @@ if st.sidebar.button("Logout", use_container_width=True):
     st.session_state["department"] = None
     st.rerun()
 
-# ==============================================================================
-# TOPIC: GLOBAL RETURN DEADLINE ALARMS & WARNING NOTIFICATIONS
-# Purpose: Displays high-priority warning cards whenever a student has equipment
-#          nearing return deadline or past due date, on every page.
-# ==============================================================================
-if is_student and user_deadline_alerts:
-    for alert in user_deadline_alerts:
-        if alert["urgency"] in ("overdue", "due_today"):
-            st.error(
-                f"🚨 **RETURN DEADLINE EXPIRED (ALARM):** **{alert['equipment_name']}** (`{alert['equipment_id']}`) "
-                f"is **{alert['status_text']}** (Deadline: **{alert['due_date']}** | Borrowed for: {alert['duration_days']} days). "
-                f"Please physically return this hardware component immediately to the **{alert['lab_name']}** counter."
-            )
-        else:
-            st.warning(
-                f"⚠️ **UPCOMING RETURN DEADLINE WARNING:** **{alert['equipment_name']}** (`{alert['equipment_id']}`) "
-                f"is **{alert['status_text']}** (Deadline: **{alert['due_date']}** | Borrowed for: {alert['duration_days']} days). "
-                f"Please finish experiments and prepare to return it to the **{alert['lab_name']}** counter."
-            )
-
 
 # ==============================================================================
 # SECTION: MODULE 5 (M5) - DASHBOARD & REAL-TIME ANALYTICS
@@ -633,6 +613,25 @@ elif "Issue Equipment" in menu:
     st.caption("Select and issue any active laboratory component for your lab practicals or mini-projects.")
 
     # --------------------------------------------------------------------------
+    # TOPIC: RETURN DEADLINE ALARMS & WARNING NOTIFICATIONS (ISSUE SECTION ONLY)
+    # Purpose: Alerts student of items nearing deadline or overdue when issuing equipment.
+    # --------------------------------------------------------------------------
+    if is_student and user_deadline_alerts:
+        for alert in user_deadline_alerts:
+            if alert["urgency"] in ("overdue", "due_today"):
+                st.error(
+                    f"🚨 **RETURN DEADLINE EXPIRED (ALARM):** **{alert['equipment_name']}** (`{alert['equipment_id']}`) "
+                    f"is **{alert['status_text']}** (Deadline: **{alert['due_date']}** | Borrowed for: {alert['duration_days']} days). "
+                    f"Please physically return this hardware component immediately to the **{alert['lab_name']}** counter."
+                )
+            else:
+                st.warning(
+                    f"⚠️ **UPCOMING RETURN DEADLINE WARNING:** **{alert['equipment_name']}** (`{alert['equipment_id']}`) "
+                    f"is **{alert['status_text']}** (Deadline: **{alert['due_date']}** | Borrowed for: {alert['duration_days']} days). "
+                    f"Please finish experiments and prepare to return it to the **{alert['lab_name']}** counter."
+                )
+
+    # --------------------------------------------------------------------------
     # TOPIC: ISSUE SUCCESS NOTIFICATION & PHYSICAL PICKUP REMINDER
     # Purpose: Shows confirmation of successful issue and reminds student of lab pickup desk and deadline.
     # --------------------------------------------------------------------------
@@ -878,21 +877,6 @@ elif "My Borrowed Items" in menu:
     m3.metric("⚠️ Due Soon (<= 3 Days)", len(duesoon_items_list))
     m4.metric("Returned", len(returned_items))
     m5.metric("Lifetime Borrowed", len(s_df) if not s_df.empty else 0)
-
-    # --------------------------------------------------------------------------
-    # TOPIC: DEADLINE ALARM NOTIFICATION CALLOUTS
-    # Purpose: Displays urgent alert banners for student's overdue and due soon hardware.
-    # --------------------------------------------------------------------------
-    if overdue_items_list:
-        st.error(
-            f"🚨 **DEADLINE ALARM: {len(overdue_items_list)} component(s) have passed their return deadline!** "
-            "Please return these physical components to the laboratory counter immediately to prevent academic holds."
-        )
-    if duesoon_items_list:
-        st.warning(
-            f"⚠️ **DEADLINE WARNING: {len(duesoon_items_list)} component(s) are approaching their deadline (within 3 days).** "
-            "Please ensure testing is completed and components are prepared for return."
-        )
 
     # --------------------------------------------------------------------------
     # TOPIC: CURRENTLY ACTIVE BORROWINGS & RETURN GUIDANCE
