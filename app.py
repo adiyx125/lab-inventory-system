@@ -613,23 +613,72 @@ elif "Issue Equipment" in menu:
     st.caption("Select and issue any active laboratory component for your lab practicals or mini-projects.")
 
     # --------------------------------------------------------------------------
-    # TOPIC: RETURN DEADLINE ALARMS & WARNING NOTIFICATIONS (ISSUE SECTION ONLY)
-    # Purpose: Alerts student of items nearing deadline or overdue when issuing equipment.
+    # TOPIC: RETURN DEADLINE TOAST NOTIFICATION & COMPACT DISMISSIBLE ALERT
+    # Purpose: Replaces multiple stacked warnings with a single compact, grouped
+    #          notification, a temporary toast popup (auto-disappears after few seconds),
+    #          and an explicit '✕ Dismiss' button to cut/hide if desired.
     # --------------------------------------------------------------------------
     if is_student and user_deadline_alerts:
-        for alert in user_deadline_alerts:
-            if alert["urgency"] in ("overdue", "due_today"):
-                st.error(
-                    f"🚨 **RETURN DEADLINE EXPIRED (ALARM):** **{alert['equipment_name']}** (`{alert['equipment_id']}`) "
-                    f"is **{alert['status_text']}** (Deadline: **{alert['due_date']}** | Borrowed for: {alert['duration_days']} days). "
-                    f"Please physically return this hardware component immediately to the **{alert['lab_name']}** counter."
+        overdue_items = [a for a in user_deadline_alerts if a["urgency"] in ("overdue", "due_today")]
+        duesoon_items = [a for a in user_deadline_alerts if a["urgency"] == "due_soon"]
+
+        # 1. Transient toast notification (pops up, lasts a few seconds, has 'X' cut button)
+        toast_key = f"toast_shown_{len(user_deadline_alerts)}"
+        if toast_key not in st.session_state:
+            st.session_state[toast_key] = True
+            if overdue_items:
+                st.toast(
+                    f"🚨 DEADLINE ALARM: You have {len(overdue_items)} overdue equipment item(s)! Please return to lab counter.",
+                    icon="🚨",
                 )
-            else:
-                st.warning(
-                    f"⚠️ **UPCOMING RETURN DEADLINE WARNING:** **{alert['equipment_name']}** (`{alert['equipment_id']}`) "
-                    f"is **{alert['status_text']}** (Deadline: **{alert['due_date']}** | Borrowed for: {alert['duration_days']} days). "
-                    f"Please finish experiments and prepare to return it to the **{alert['lab_name']}** counter."
+            elif duesoon_items:
+                st.toast(
+                    f"⚠️ DEADLINE WARNING: You have {len(duesoon_items)} item(s) nearing return deadline!",
+                    icon="⚠️",
                 )
+
+        # 2. Single consolidated notification box (grouped, with '✕ Dismiss' cut option)
+        if not st.session_state.get("dismiss_deadline_notice", False):
+            # Group items by equipment to prevent repetitive rows when multiple units are borrowed
+            item_counts = {}
+            for a in user_deadline_alerts:
+                key = (
+                    a["equipment_name"],
+                    a["equipment_id"],
+                    a["lab_name"],
+                    a["status_text"],
+                    a["due_date"],
+                )
+                item_counts[key] = item_counts.get(key, 0) + 1
+
+            summary_bullets = []
+            for (eq_name, eq_id, lab, status_txt, due_dt), count in item_counts.items():
+                qty_txt = f" × {count} units" if count > 1 else ""
+                summary_bullets.append(
+                    f"• **{eq_name}** (`{eq_id}`){qty_txt} — {status_txt} (Deadline: **{due_dt}**, {lab})"
+                )
+
+            has_overdue = len(overdue_items) > 0
+            alert_title = "🚨 RETURN DEADLINE EXPIRED (ALARM)" if has_overdue else "⚠️ UPCOMING RETURN DEADLINE WARNING"
+            total_items_count = len(user_deadline_alerts)
+
+            with st.container():
+                col_msg, col_cut = st.columns([0.86, 0.14])
+                with col_msg:
+                    notice_text = (
+                        f"**{alert_title}:** You have **{total_items_count} component(s)** with active deadline alerts.\n\n"
+                        + "\n".join(summary_bullets[:5])
+                        + ("\n• *...and more items*" if len(summary_bullets) > 5 else "")
+                    )
+                    if has_overdue:
+                        st.error(notice_text)
+                    else:
+                        st.warning(notice_text)
+                with col_cut:
+                    st.write("")
+                    if st.button("✕ Dismiss", key="btn_cut_deadline_notice", help="Click to cut / hide this warning for this session", use_container_width=True):
+                        st.session_state["dismiss_deadline_notice"] = True
+                        st.rerun()
 
     # --------------------------------------------------------------------------
     # TOPIC: ISSUE SUCCESS NOTIFICATION & PHYSICAL PICKUP REMINDER
